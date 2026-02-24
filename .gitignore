@@ -1,6 +1,6 @@
 # Binaries
-sbxb
-sbxb-*
+/sbxb
+/sbxb-*
 *.exe
 
 # Build
