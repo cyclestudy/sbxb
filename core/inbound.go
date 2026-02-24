@@ -588,10 +588,11 @@ func buildHysteria2(nodeInfo *xboard.NodeInfo, users []xboard.UserInfo, tag stri
 	}
 
 	opts := option.Hysteria2InboundOptions{
-		ListenOptions: buildListenOptions(nodeInfo),
-		UpMbps:        nodeInfo.UpMbps,
-		DownMbps:      nodeInfo.DownMbps,
-		Users:         hy2Users,
+		ListenOptions:         buildListenOptions(nodeInfo),
+		UpMbps:                nodeInfo.UpMbps,
+		DownMbps:              nodeInfo.DownMbps,
+		IgnoreClientBandwidth: nodeInfo.UpMbps == 0 && nodeInfo.DownMbps == 0,
+		Users:                 hy2Users,
 		InboundTLSOptionsContainer: option.InboundTLSOptionsContainer{
 			TLS: tls,
 		},
