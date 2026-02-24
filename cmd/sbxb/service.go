@@ -33,7 +33,7 @@ var startCmd = &cobra.Command{
 	Use:   "start",
 	Short: "Start sbxb service",
 	Run: func(cmd *cobra.Command, args []string) {
-		runSystemctl("start")
+		serviceAction("start")
 	},
 }
 
@@ -41,7 +41,7 @@ var stopCmd = &cobra.Command{
 	Use:   "stop",
 	Short: "Stop sbxb service",
 	Run: func(cmd *cobra.Command, args []string) {
-		runSystemctl("stop")
+		serviceAction("stop")
 	},
 }
 
@@ -49,7 +49,7 @@ var restartCmd = &cobra.Command{
 	Use:   "restart",
 	Short: "Restart sbxb service",
 	Run: func(cmd *cobra.Command, args []string) {
-		runSystemctl("restart")
+		serviceAction("restart")
 	},
 }
 
@@ -57,7 +57,7 @@ var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show sbxb service status",
 	Run: func(cmd *cobra.Command, args []string) {
-		runSystemctl("status")
+		serviceAction("status")
 	},
 }
 
@@ -65,7 +65,7 @@ var enableCmd = &cobra.Command{
 	Use:   "enable",
 	Short: "Enable sbxb auto-start on boot",
 	Run: func(cmd *cobra.Command, args []string) {
-		runSystemctl("enable")
+		serviceEnable()
 	},
 }
 
@@ -73,7 +73,7 @@ var disableCmd = &cobra.Command{
 	Use:   "disable",
 	Short: "Disable sbxb auto-start on boot",
 	Run: func(cmd *cobra.Command, args []string) {
-		runSystemctl("disable")
+		serviceDisable()
 	},
 }
 
@@ -81,27 +81,7 @@ var logCmd = &cobra.Command{
 	Use:   "log",
 	Short: "View sbxb service logs",
 	Run: func(cmd *cobra.Command, args []string) {
-		c := exec.Command("journalctl", "-u", serviceName+".service", "-e", "--no-pager", "-f")
-		c.Stdout = os.Stdout
-		c.Stderr = os.Stderr
-		// Ensure journalctl is killed when the parent process dies (e.g. SSH disconnect).
-		setPdeathsig(c)
-
-		if err := c.Start(); err != nil {
-			fmt.Printf("Failed to start journalctl: %v\n", err)
-			return
-		}
-
-		// Forward SIGINT/SIGTERM to journalctl so Ctrl+C cleanly stops both.
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, os.Interrupt)
-		go func() {
-			<-sigCh
-			_ = c.Process.Kill()
-		}()
-
-		_ = c.Wait()
-		signal.Stop(sigCh)
+		viewLog()
 	},
 }
 
@@ -137,16 +117,16 @@ var configCmd = &cobra.Command{
 		answer, _ := reader.ReadString('\n')
 		answer = strings.TrimSpace(strings.ToLower(answer))
 		if answer == "" || answer == "y" || answer == "yes" {
-			runSystemctl("restart")
+			serviceAction("restart")
 		}
 	},
 }
 
 var installServiceCmd = &cobra.Command{
 	Use:   "install",
-	Short: "Install sbxb systemd service",
+	Short: "Install sbxb as a system service",
 	Run: func(cmd *cobra.Command, args []string) {
-		installService()
+		serviceInstall()
 	},
 }
 
@@ -154,98 +134,50 @@ var uninstallCmd = &cobra.Command{
 	Use:   "uninstall",
 	Short: "Uninstall sbxb service and binary",
 	Run: func(cmd *cobra.Command, args []string) {
-		uninstall()
+		fmt.Print("This will stop and remove sbxb service. Continue? [y/N] ")
+		reader := bufio.NewReader(os.Stdin)
+		answer, _ := reader.ReadString('\n')
+		answer = strings.TrimSpace(strings.ToLower(answer))
+		if answer != "y" && answer != "yes" {
+			fmt.Println("Cancelled.")
+			return
+		}
+		serviceUninstall()
 	},
 }
 
-func runSystemctl(action string) {
-	if _, err := exec.LookPath("systemctl"); err != nil {
-		fmt.Println("systemctl not found. Only systemd is supported.")
-		return
-	}
-	c := exec.Command("systemctl", action, serviceName+".service")
-	if action == "status" {
-		// Only show output for status queries.
-		c.Stdout = os.Stdout
-		c.Stderr = os.Stderr
-	}
-	if err := c.Run(); err != nil && action != "status" {
-		fmt.Printf("Failed to %s service: %v\n", action, err)
-		return
-	}
-	if action != "status" {
-		fmt.Printf("sbxb service %sed.\n", action)
-	}
-}
-
-func getServiceStatus() string {
-	if _, err := exec.LookPath("systemctl"); err != nil {
-		return "unknown"
-	}
-	out, err := exec.Command("systemctl", "is-active", serviceName+".service").Output()
-	if err != nil {
-		return "not installed"
-	}
-	return strings.TrimSpace(string(out))
-}
-
-func isEnabled() bool {
-	out, err := exec.Command("systemctl", "is-enabled", serviceName+".service").Output()
-	if err != nil {
-		return false
-	}
-	return strings.TrimSpace(string(out)) == "enabled"
-}
-
-func installService() {
-	binPath, err := os.Executable()
-	if err != nil {
-		fmt.Printf("Failed to get executable path: %v\n", err)
+// viewLog tails service logs using the appropriate tool for the init system.
+func viewLog() {
+	var c *exec.Cmd
+	switch detectInit() {
+	case initSystemd:
+		c = exec.Command("journalctl", "-u", serviceName+".service", "-e", "--no-pager", "-f")
+	case initProcd:
+		// OpenWrt uses logread.
+		c = exec.Command("logread", "-f", "-e", serviceName)
+	case initSysVinit:
+		c = exec.Command("tail", "-f", sysvinitLog)
+	default:
+		fmt.Println("No supported init system found.")
 		return
 	}
 
-	unit := fmt.Sprintf(`[Unit]
-Description=sbxb - sing-box node backend for XBoard
-After=network.target
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	setPdeathsig(c)
 
-[Service]
-Type=simple
-ExecStart=%s server -c %s
-Restart=on-failure
-RestartSec=5
-LimitNOFILE=1048576
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-`, binPath, configFile)
-
-	if err := os.WriteFile("/etc/systemd/system/"+serviceName+".service", []byte(unit), 0644); err != nil {
-		fmt.Printf("Failed to write service file: %v\n", err)
+	if err := c.Start(); err != nil {
+		fmt.Printf("Failed to view logs: %v\n", err)
 		return
 	}
 
-	exec.Command("systemctl", "daemon-reload").Run()
-	fmt.Println("Service installed. Use 'sbxb start' to start.")
-}
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt)
+	go func() {
+		<-sigCh
+		_ = c.Process.Kill()
+	}()
 
-func uninstall() {
-	fmt.Print("This will stop and remove sbxb service. Continue? [y/N] ")
-	reader := bufio.NewReader(os.Stdin)
-	answer, _ := reader.ReadString('\n')
-	answer = strings.TrimSpace(strings.ToLower(answer))
-	if answer != "y" && answer != "yes" {
-		fmt.Println("Cancelled.")
-		return
-	}
-
-	exec.Command("systemctl", "stop", serviceName+".service").Run()
-	exec.Command("systemctl", "disable", serviceName+".service").Run()
-	os.Remove("/etc/systemd/system/" + serviceName + ".service")
-	exec.Command("systemctl", "daemon-reload").Run()
-	os.Remove("/usr/local/bin/sbxb")
-	os.RemoveAll("/usr/local/sbxb")
-
-	fmt.Println("sbxb service removed. Config preserved at " + configFile)
+	_ = c.Wait()
+	signal.Stop(sigCh)
 }

@@ -120,28 +120,9 @@ EOF
         info "Config already exists, skipping"
     fi
 
-    # Systemd
-    if command -v systemctl &>/dev/null; then
-        cat > /etc/systemd/system/${SERVICE_NAME}.service <<EOF
-[Unit]
-Description=sbxb - sing-box node backend for XBoard
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=${INSTALL_DIR}/sbxb server -c ${CONFIG_DIR}/config.json
-Restart=on-failure
-RestartSec=5
-LimitNOFILE=1048576
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-EOF
-        systemctl daemon-reload
-        info "Systemd service installed"
-    fi
+    # Install service (auto-detect init system)
+    "${INSTALL_DIR}/sbxb" install
+    info "Service installed"
 
     echo ""
     info "Installation complete! (${version})"
@@ -206,6 +187,14 @@ uninstall() {
         systemctl disable ${SERVICE_NAME}.service 2>/dev/null || true
         rm -f /etc/systemd/system/${SERVICE_NAME}.service
         systemctl daemon-reload
+    elif [ -f "/etc/init.d/${SERVICE_NAME}" ]; then
+        /etc/init.d/${SERVICE_NAME} stop 2>/dev/null || true
+        if command -v update-rc.d &>/dev/null; then
+            update-rc.d -f ${SERVICE_NAME} remove 2>/dev/null || true
+        elif command -v chkconfig &>/dev/null; then
+            chkconfig ${SERVICE_NAME} off 2>/dev/null || true
+        fi
+        rm -f /etc/init.d/${SERVICE_NAME}
     fi
 
     rm -f /usr/local/bin/sbxb

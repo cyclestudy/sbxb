@@ -68,25 +68,25 @@ func showMenu() {
 		case "0":
 			configCmd.Run(nil, nil)
 		case "1":
-			runSystemctl("start")
+			serviceAction("start")
 		case "2":
-			runSystemctl("stop")
+			serviceAction("stop")
 		case "3":
-			runSystemctl("restart")
+			serviceAction("restart")
 		case "4":
-			runSystemctl("status")
+			serviceAction("status")
 		case "5":
 			logCmd.Run(nil, nil)
 		case "6":
-			runSystemctl("enable")
+			serviceEnable()
 		case "7":
-			runSystemctl("disable")
+			serviceDisable()
 		case "8":
 			doUpdate()
 		case "9":
-			installService()
+			serviceInstall()
 		case "10":
-			uninstall()
+			serviceUninstall()
 			return
 		case "11":
 			fmt.Printf("sbxb %s (%s)\n", version, commit)
