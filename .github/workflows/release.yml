@@ -54,7 +54,7 @@ jobs:
           BINARY="${BINARY}${EXT}"
 
           go build -tags "with_quic" \
-            -ldflags "-s -w -X github.com/sbxb-dev/sbxb/cmd/sbxb.version=${VERSION} -X github.com/sbxb-dev/sbxb/cmd/sbxb.commit=${COMMIT}" \
+            -ldflags "-s -w -X github.com/cyclestudy/sbxb/cmd/sbxb.version=${VERSION} -X github.com/cyclestudy/sbxb/cmd/sbxb.commit=${COMMIT}" \
             -o "${BINARY}" .
 
           if [ "$GOOS" != "windows" ]; then
