@@ -27,7 +27,8 @@ type Manager struct {
 	routeChangeCh chan struct{}
 	reloadCancel  context.CancelFunc
 
-	mu sync.Mutex
+	reloadMu sync.Mutex // serializes Reload calls
+	mu       sync.Mutex // protects fields above
 }
 
 // NewManager creates a Manager but does not start anything. Call
@@ -113,11 +114,10 @@ func (m *Manager) Start(ctx context.Context, cfg conf.Config) error {
 		srcRules, srcRuleSets = core.BuildSourceIPRules(cfg.BlockSourceIPs)
 	}
 
-	// Build route options.
-	allRules := append(routeResult.Rules, srcRules...)
-	allRuleSets := append(routeResult.RuleSets, srcRuleSets...)
+	// Build route options (deduplicate rule sets by tag).
+	allRuleSets := deduplicateRuleSets(append(routeResult.RuleSets, srcRuleSets...))
 
-	if len(allRules) > 0 || routeResult.NeedSniff {
+	if len(routeResult.Rules) > 0 || len(srcRules) > 0 || routeResult.NeedSniff {
 		var rules []option.Rule
 
 		// Add sniff rule first if protocol detection is needed.
@@ -246,24 +246,36 @@ func (m *Manager) Close() {
 	slog.Info("manager: closed")
 }
 
-// watchRouteChanges waits for a route-change signal from any controller
+// watchRouteChanges waits for route-change signals from any controller
 // and triggers a full Manager reload.
 func (m *Manager) watchRouteChanges(ctx context.Context) {
-	select {
-	case <-ctx.Done():
-		return
-	case <-m.routeChangeCh:
-		slog.Info("manager: route change detected, performing full reload")
-		if err := m.Reload(m.lastCtx, m.lastCfg); err != nil {
-			slog.Error("manager: route-change reload failed", "error", err)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-m.routeChangeCh:
+			slog.Info("manager: route change detected, performing full reload")
+
+			m.mu.Lock()
+			savedCtx := m.lastCtx
+			savedCfg := m.lastCfg
+			m.mu.Unlock()
+
+			if err := m.Reload(savedCtx, savedCfg); err != nil {
+				slog.Error("manager: route-change reload failed", "error", err)
+			}
 		}
 	}
 }
 
 // Reload tears down all controllers and the core, then restarts with
 // the new set of configurations. This is a full restart, not a hot
-// reload.
+// reload. It is serialized via reloadMu to prevent concurrent reloads
+// from orphaning resources.
 func (m *Manager) Reload(ctx context.Context, cfg conf.Config) error {
+	m.reloadMu.Lock()
+	defer m.reloadMu.Unlock()
+
 	slog.Info("manager: reloading", "newNodeCount", len(cfg.Nodes))
 
 	m.Close()
@@ -274,4 +286,17 @@ func (m *Manager) Reload(ctx context.Context, cfg conf.Config) error {
 
 	slog.Info("manager: reload complete")
 	return nil
+}
+
+// deduplicateRuleSets removes duplicate RuleSets by tag, keeping the first occurrence.
+func deduplicateRuleSets(sets []option.RuleSet) []option.RuleSet {
+	seen := make(map[string]bool, len(sets))
+	result := make([]option.RuleSet, 0, len(sets))
+	for _, s := range sets {
+		if !seen[s.Tag] {
+			seen[s.Tag] = true
+			result = append(result, s)
+		}
+	}
+	return result
 }

@@ -33,8 +33,15 @@ func (ctrl *Controller) startTasks() {
 		ctrl.trafficReporter,
 	)
 
-	go pullTask.Start(ctrl.ctx)
-	go pushTask.Start(ctrl.ctx)
+	ctrl.wg.Add(2)
+	go func() {
+		defer ctrl.wg.Done()
+		pullTask.Start(ctrl.ctx)
+	}()
+	go func() {
+		defer ctrl.wg.Done()
+		pushTask.Start(ctrl.ctx)
+	}()
 }
 
 // nodeInfoMonitor is called periodically to pull configuration changes
@@ -129,7 +136,10 @@ func (ctrl *Controller) trafficReporter(ctx context.Context) error {
 	// 3. Report traffic to panel (only if there is data).
 	if len(filtered) > 0 {
 		if err := ctrl.client.ReportTraffic(filtered); err != nil {
-			slog.Error("failed to report traffic",
+			// Restore unreported traffic back to the counters so it will
+			// be included in the next reporting cycle.
+			ctrl.tracker.RestoreTraffic(filtered)
+			slog.Error("failed to report traffic, data preserved for retry",
 				"nodeID", nodeID,
 				"error", err,
 			)

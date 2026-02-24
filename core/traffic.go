@@ -85,6 +85,17 @@ func (t *TrafficTracker) GetTraffic() map[int][2]int64 {
 	return result
 }
 
+// RestoreTraffic adds back traffic that failed to be reported.
+// This prevents data loss when the panel API is unreachable.
+func (t *TrafficTracker) RestoreTraffic(data map[int][2]int64) {
+	for uid, amounts := range data {
+		name := strconv.Itoa(uid)
+		c := t.storage.GetOrCreate(name)
+		c.AddUpload(amounts[0])
+		c.AddDownload(amounts[1])
+	}
+}
+
 // ---------------------------------------------------------------------------
 // countConn wraps net.Conn to count bytes per Read/Write.
 // ---------------------------------------------------------------------------
@@ -109,12 +120,6 @@ func (c *countConn) Write(b []byte) (n int, err error) {
 		c.storage.GetOrCreate(c.user).AddUpload(int64(n))
 	}
 	return
-}
-
-// Upstream returns the underlying connection (implements
-// sing-box's UpstreamWritable interface for splice/zero-copy).
-func (c *countConn) Upstream() any {
-	return c.Conn
 }
 
 // ---------------------------------------------------------------------------
@@ -142,9 +147,4 @@ func (c *countPacketConn) WritePacket(buffer *buf.Buffer, destination M.Socksadd
 		c.storage.GetOrCreate(c.user).AddUpload(int64(n))
 	}
 	return err
-}
-
-// Upstream returns the underlying packet connection.
-func (c *countPacketConn) Upstream() any {
-	return c.PacketConn
 }

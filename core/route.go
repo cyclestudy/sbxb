@@ -31,6 +31,7 @@ type RouteResult struct {
 // extra outbounds (for default_out), and the final outbound tag.
 func BuildRouteRules(routes []xboard.Route) RouteResult {
 	var result RouteResult
+	ruleSetSeen := make(map[string]bool) // deduplicate rule sets by tag
 
 	for _, r := range routes {
 		switch r.Action {
@@ -58,15 +59,18 @@ func BuildRouteRules(routes []xboard.Route) RouteResult {
 				if strings.HasPrefix(m, "geoip:") {
 					code := strings.TrimPrefix(m, "geoip:")
 					tag := "geoip-" + code
-					result.RuleSets = append(result.RuleSets, option.RuleSet{
-						Type:   C.RuleSetTypeRemote,
-						Tag:    tag,
-						Format: C.RuleSetFormatBinary,
-						RemoteOptions: option.RemoteRuleSet{
-							URL:            "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-" + code + ".srs",
-							DownloadDetour: "direct",
-						},
-					})
+					if !ruleSetSeen[tag] {
+						ruleSetSeen[tag] = true
+						result.RuleSets = append(result.RuleSets, option.RuleSet{
+							Type:   C.RuleSetTypeRemote,
+							Tag:    tag,
+							Format: C.RuleSetFormatBinary,
+							RemoteOptions: option.RemoteRuleSet{
+								URL:            "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-" + code + ".srs",
+								DownloadDetour: "direct",
+							},
+						})
+					}
 					result.Rules = append(result.Rules, option.Rule{
 						Type: C.RuleTypeDefault,
 						DefaultOptions: option.DefaultRule{
@@ -238,15 +242,18 @@ func BuildRouteRules(routes []xboard.Route) RouteResult {
 				if strings.HasPrefix(m, "geoip:") {
 					code := strings.TrimPrefix(m, "geoip:")
 					rsTag := "geoip-" + code
-					result.RuleSets = append(result.RuleSets, option.RuleSet{
-						Type:   C.RuleSetTypeRemote,
-						Tag:    rsTag,
-						Format: C.RuleSetFormatBinary,
-						RemoteOptions: option.RemoteRuleSet{
-							URL:            "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-" + code + ".srs",
-							DownloadDetour: "direct",
-						},
-					})
+					if !ruleSetSeen[rsTag] {
+						ruleSetSeen[rsTag] = true
+						result.RuleSets = append(result.RuleSets, option.RuleSet{
+							Type:   C.RuleSetTypeRemote,
+							Tag:    rsTag,
+							Format: C.RuleSetFormatBinary,
+							RemoteOptions: option.RemoteRuleSet{
+								URL:            "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-" + code + ".srs",
+								DownloadDetour: "direct",
+							},
+						})
+					}
 					result.Rules = append(result.Rules, option.Rule{
 						Type: C.RuleTypeDefault,
 						DefaultOptions: option.DefaultRule{

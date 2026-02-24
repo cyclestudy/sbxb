@@ -51,7 +51,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	}
 
 	// Watch config file for hot-reload.
-	go conf.Watch(configPath, func() {
+	go conf.Watch(ctx, configPath, func() {
 		slog.Info("config file changed, reloading...")
 		newCfg, err := conf.Load(configPath)
 		if err != nil {

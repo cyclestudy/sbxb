@@ -33,6 +33,7 @@ type Controller struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
+	wg     sync.WaitGroup
 	mu     sync.Mutex
 }
 
@@ -135,12 +136,19 @@ func (ctrl *Controller) Start(ctx context.Context) error {
 // the inbound from the core.
 func (ctrl *Controller) Close() {
 	ctrl.mu.Lock()
-	defer ctrl.mu.Unlock()
 
 	if ctrl.cancel != nil {
 		ctrl.cancel()
 		ctrl.cancel = nil
 	}
+
+	ctrl.mu.Unlock()
+
+	// Wait for periodic tasks to finish before removing inbound.
+	ctrl.wg.Wait()
+
+	ctrl.mu.Lock()
+	defer ctrl.mu.Unlock()
 
 	if ctrl.tag != "" {
 		if err := ctrl.core.RemoveInbound(ctrl.tag); err != nil {

@@ -1,6 +1,7 @@
 package conf
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -99,8 +100,8 @@ func Load(path string) (*Config, error) {
 
 // Watch monitors the configuration file for changes and calls callback when
 // a modification is detected. A 5-second debounce prevents rapid repeated
-// invocations. Watch blocks; call it in a goroutine.
-func Watch(path string, callback func()) {
+// invocations. Watch blocks until ctx is cancelled; call it in a goroutine.
+func Watch(ctx context.Context, path string, callback func()) {
 	if path == "" {
 		path = defaultConfigPath
 	}
@@ -135,6 +136,15 @@ func Watch(path string, callback func()) {
 
 	for {
 		select {
+		case <-ctx.Done():
+			mu.Lock()
+			if timer != nil {
+				timer.Stop()
+			}
+			mu.Unlock()
+			slog.Info("config file watcher stopped")
+			return
+
 		case event, ok := <-watcher.Events:
 			if !ok {
 				return

@@ -442,6 +442,12 @@ func buildShadowsocks(nodeInfo *xboard.NodeInfo, users []xboard.UserInfo, tag st
 		Method:        method,
 	}
 
+	if len(users) == 0 {
+		return nil, fmt.Errorf("shadowsocks requires at least one user")
+	}
+
+	ssUsers := make([]option.ShadowsocksUser, 0, len(users))
+
 	if isSIP022(method) {
 		// SIP022 multi-user mode: server PSK + per-user sub-keys.
 		if nodeInfo.ServerKey == "" {
@@ -450,25 +456,22 @@ func buildShadowsocks(nodeInfo *xboard.NodeInfo, users []xboard.UserInfo, tag st
 		opts.Password = nodeInfo.ServerKey
 
 		keySize := sip022KeySize(method)
-		ssUsers := make([]option.ShadowsocksUser, 0, len(users))
 		for _, u := range users {
 			ssUsers = append(ssUsers, option.ShadowsocksUser{
 				Name:     strconv.Itoa(u.ID),
 				Password: deriveSSUserKey(u.UUID, keySize),
 			})
 		}
-		opts.Users = ssUsers
 	} else {
-		// Legacy AEAD ciphers: single-user mode (sing-box does not support
-		// multi-user for non-SIP022 ciphers).
-		if len(users) == 0 {
-			return nil, fmt.Errorf("shadowsocks legacy cipher requires at least one user")
+		// Legacy AEAD ciphers: multi-user mode via ShadowsocksMulti.
+		for _, u := range users {
+			ssUsers = append(ssUsers, option.ShadowsocksUser{
+				Name:     strconv.Itoa(u.ID),
+				Password: u.UUID,
+			})
 		}
-		opts.Password = users[0].UUID
-
-		slog.Info("shadowsocks legacy cipher uses single-user mode",
-			"method", method, "user_count", len(users))
 	}
+	opts.Users = ssUsers
 
 	return &option.Inbound{
 		Type:    C.TypeShadowsocks,
