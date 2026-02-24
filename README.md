@@ -78,28 +78,40 @@ Multiple nodes can be configured in the `nodes` array to run on a single instanc
 
 ## Usage
 
-```bash
-# Start server
-sbxb server -c /etc/sbxb/config.json
+Run `sbxb` without arguments to enter the interactive management menu:
 
-# Show version
-sbxb version
+```
+  sbxb Management
+  Version: v0.2.0 (efc0df1)  Go go1.24.12 linux/amd64
+  Status: running  Auto-start: enabled
+—————————————————————————————
+  0. Edit config
+  1. Start sbxb
+  2. Stop sbxb
+  3. Restart sbxb
+  4. View status
+  5. View logs
+  ...
 ```
 
-### Systemd Management
+### CLI Commands
 
-```bash
-systemctl start sbxb
-systemctl enable sbxb
-systemctl status sbxb
-journalctl -u sbxb -f
-```
-
-### Uninstall
-
-```bash
-bash <(curl -sL https://raw.githubusercontent.com/cyclestudy/sbxb/main/install.sh) uninstall
-```
+| Command | Description |
+|---|---|
+| `sbxb` | Interactive management menu |
+| `sbxb server -c config.json` | Start the node backend (foreground) |
+| `sbxb start` | Start systemd service |
+| `sbxb stop` | Stop systemd service |
+| `sbxb restart` | Restart systemd service |
+| `sbxb status` | Show service status |
+| `sbxb log` | View service logs (realtime) |
+| `sbxb enable` | Enable auto-start on boot |
+| `sbxb disable` | Disable auto-start on boot |
+| `sbxb config` | Edit config file, optionally restart |
+| `sbxb update` | Self-update from GitHub releases |
+| `sbxb install` | Install systemd service |
+| `sbxb uninstall` | Uninstall service and binary |
+| `sbxb version` | Print version information |
 
 ## Supported Platforms
 
