@@ -146,8 +146,11 @@ func runSystemctl(action string) {
 		return
 	}
 	c := exec.Command("systemctl", action, serviceName+".service")
-	c.Stdout = os.Stdout
-	c.Stderr = os.Stderr
+	if action == "status" {
+		// Only show output for status queries.
+		c.Stdout = os.Stdout
+		c.Stderr = os.Stderr
+	}
 	if err := c.Run(); err != nil && action != "status" {
 		fmt.Printf("Failed to %s service: %v\n", action, err)
 		return
@@ -193,6 +196,8 @@ ExecStart=%s server -c %s
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=1048576
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
