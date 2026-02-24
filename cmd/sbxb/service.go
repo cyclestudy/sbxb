@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/spf13/cobra"
 )
@@ -83,7 +85,24 @@ var logCmd = &cobra.Command{
 		c := exec.Command("journalctl", "-u", serviceName+".service", "-e", "--no-pager", "-f")
 		c.Stdout = os.Stdout
 		c.Stderr = os.Stderr
-		_ = c.Run()
+		// Ensure journalctl is killed when the parent process dies (e.g. SSH disconnect).
+		c.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGTERM}
+
+		if err := c.Start(); err != nil {
+			fmt.Printf("Failed to start journalctl: %v\n", err)
+			return
+		}
+
+		// Forward SIGINT/SIGTERM to journalctl so Ctrl+C cleanly stops both.
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		go func() {
+			<-sigCh
+			_ = c.Process.Signal(syscall.SIGTERM)
+		}()
+
+		_ = c.Wait()
+		signal.Stop(sigCh)
 	},
 }
 
