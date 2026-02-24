@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/netip"
+	"os"
 	"strconv"
 	"strings"
 
@@ -182,6 +183,54 @@ func buildTLS(nodeInfo *xboard.NodeInfo) *option.InboundTLSOptions {
 		CertificatePath: certPath,
 		KeyPath:         keyPath,
 	}
+}
+
+// ensureTLS returns the TLS config from buildTLS, or creates one for
+// protocols that always require TLS (Hysteria2, TUIC). If no cert files
+// exist at the default paths, a self-signed certificate is generated.
+func ensureTLS(nodeInfo *xboard.NodeInfo) (*option.InboundTLSOptions, error) {
+	if tls := buildTLS(nodeInfo); tls != nil {
+		return tls, nil
+	}
+
+	// Resolve server name from available fields.
+	serverName := nodeInfo.ServerName
+	if serverName == "" {
+		serverName = nodeInfo.Host
+	}
+	if serverName == "" {
+		serverName = "localhost"
+	}
+
+	// Try default cert paths first.
+	certPath := "/root/.cert/server.crt"
+	keyPath := "/root/.cert/server.key"
+	if _, err := os.Stat(certPath); err == nil {
+		if _, err := os.Stat(keyPath); err == nil {
+			slog.Info("TLS: using default cert files",
+				"cert", certPath, "key", keyPath)
+			return &option.InboundTLSOptions{
+				Enabled:         true,
+				ServerName:      serverName,
+				CertificatePath: certPath,
+				KeyPath:         keyPath,
+			}, nil
+		}
+	}
+
+	// No cert files found — generate self-signed.
+	certPEM, keyPEM, err := generateSelfSignedCert(serverName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate self-signed cert: %w", err)
+	}
+
+	slog.Info("TLS: generated self-signed certificate", "serverName", serverName)
+	return &option.InboundTLSOptions{
+		Enabled:    true,
+		ServerName: serverName,
+		Certificate: badoption.Listable[string]{certPEM},
+		Key:         badoption.Listable[string]{keyPEM},
+	}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -493,13 +542,18 @@ func buildHysteria2(nodeInfo *xboard.NodeInfo, users []xboard.UserInfo, tag stri
 		})
 	}
 
+	tls, err := ensureTLS(nodeInfo)
+	if err != nil {
+		return nil, fmt.Errorf("hysteria2: %w", err)
+	}
+
 	opts := option.Hysteria2InboundOptions{
 		ListenOptions: buildListenOptions(nodeInfo),
 		UpMbps:        nodeInfo.UpMbps,
 		DownMbps:      nodeInfo.DownMbps,
 		Users:         hy2Users,
 		InboundTLSOptionsContainer: option.InboundTLSOptionsContainer{
-			TLS: buildTLS(nodeInfo),
+			TLS: tls,
 		},
 	}
 
@@ -536,6 +590,11 @@ func buildTUIC(nodeInfo *xboard.NodeInfo, users []xboard.UserInfo, tag string) (
 		congestion = "bbr" // sensible default
 	}
 
+	tls, err := ensureTLS(nodeInfo)
+	if err != nil {
+		return nil, fmt.Errorf("tuic: %w", err)
+	}
+
 	return &option.Inbound{
 		Type: C.TypeTUIC,
 		Tag:  tag,
@@ -544,7 +603,7 @@ func buildTUIC(nodeInfo *xboard.NodeInfo, users []xboard.UserInfo, tag string) (
 			Users:             tuicUsers,
 			CongestionControl: congestion,
 			InboundTLSOptionsContainer: option.InboundTLSOptionsContainer{
-				TLS: buildTLS(nodeInfo),
+				TLS: tls,
 			},
 		},
 	}, nil
