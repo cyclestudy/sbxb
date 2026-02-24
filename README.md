@@ -25,7 +25,21 @@ Built on [sing-box](https://github.com/SagerNet/sing-box) core as a Go library, 
 bash <(curl -sL https://raw.githubusercontent.com/cyclestudy/sbxb/main/install.sh)
 ```
 
-This will download the latest release, install to `/usr/local/sbxb/`, create a systemd service, and generate a config template at `/etc/sbxb/config.json`.
+### Update
+
+```bash
+bash <(curl -sL https://raw.githubusercontent.com/cyclestudy/sbxb/main/install.sh) update
+```
+
+Or if already installed: `sbxb update`
+
+### Uninstall
+
+```bash
+bash <(curl -sL https://raw.githubusercontent.com/cyclestudy/sbxb/main/install.sh) uninstall
+```
+
+Or if already installed: `sbxb uninstall`
 
 ### Manual Install
 
