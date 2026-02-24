@@ -93,6 +93,28 @@ func getMapStringMap(m map[string]interface{}, key string) map[string]interface{
 	return nil
 }
 
+// getCertPath extracts the certificate file path from tls_settings,
+// supporting both XBoard naming conventions:
+//   - certificate_path (standard)
+//   - cert_file (SubscriptionGuard plugin)
+func getCertPath(m map[string]interface{}) string {
+	if p := getMapString(m, "certificate_path"); p != "" {
+		return p
+	}
+	return getMapString(m, "cert_file")
+}
+
+// getKeyPath extracts the private key file path from tls_settings,
+// supporting both XBoard naming conventions:
+//   - key_path (standard)
+//   - key_file (SubscriptionGuard plugin)
+func getKeyPath(m map[string]interface{}) string {
+	if p := getMapString(m, "key_path"); p != "" {
+		return p
+	}
+	return getMapString(m, "key_file")
+}
+
 // ---------------------------------------------------------------------------
 // Listen options
 // ---------------------------------------------------------------------------
@@ -168,14 +190,8 @@ func buildTLS(nodeInfo *xboard.NodeInfo) *option.InboundTLSOptions {
 	}
 
 	// Standard TLS (tls == 1)
-	certPath := getMapString(nodeInfo.TLSSettings, "certificate_path")
-	if certPath == "" {
-		certPath = "/root/.cert/server.crt"
-	}
-	keyPath := getMapString(nodeInfo.TLSSettings, "key_path")
-	if keyPath == "" {
-		keyPath = "/root/.cert/server.key"
-	}
+	certPath := getCertPath(nodeInfo.TLSSettings)
+	keyPath := getKeyPath(nodeInfo.TLSSettings)
 
 	return &option.InboundTLSOptions{
 		Enabled:         true,
@@ -186,15 +202,19 @@ func buildTLS(nodeInfo *xboard.NodeInfo) *option.InboundTLSOptions {
 }
 
 // ensureTLS returns the TLS config from buildTLS, or creates one for
-// protocols that always require TLS (Hysteria2, TUIC). If no cert files
-// exist at the default paths, a self-signed certificate is generated.
+// protocols that always require TLS (Hysteria2, TUIC). It checks
+// tls_settings for cert paths (supporting both certificate_path/key_path
+// and cert_file/key_file naming), then default paths, then self-signed.
 func ensureTLS(nodeInfo *xboard.NodeInfo) (*option.InboundTLSOptions, error) {
 	if tls := buildTLS(nodeInfo); tls != nil {
 		return tls, nil
 	}
 
 	// Resolve server name from available fields.
-	serverName := nodeInfo.ServerName
+	serverName := getMapString(nodeInfo.TLSSettings, "server_name")
+	if serverName == "" {
+		serverName = nodeInfo.ServerName
+	}
 	if serverName == "" {
 		serverName = nodeInfo.Host
 	}
@@ -202,18 +222,38 @@ func ensureTLS(nodeInfo *xboard.NodeInfo) (*option.InboundTLSOptions, error) {
 		serverName = "localhost"
 	}
 
-	// Try default cert paths first.
-	certPath := "/root/.cert/server.crt"
-	keyPath := "/root/.cert/server.key"
-	if _, err := os.Stat(certPath); err == nil {
-		if _, err := os.Stat(keyPath); err == nil {
+	// Check tls_settings for cert paths (even when tls==0).
+	certPath := getCertPath(nodeInfo.TLSSettings)
+	keyPath := getKeyPath(nodeInfo.TLSSettings)
+	if certPath != "" && keyPath != "" {
+		if _, err := os.Stat(certPath); err == nil {
+			if _, err := os.Stat(keyPath); err == nil {
+				slog.Info("TLS: using cert from tls_settings",
+					"cert", certPath, "key", keyPath)
+				return &option.InboundTLSOptions{
+					Enabled:         true,
+					ServerName:      serverName,
+					CertificatePath: certPath,
+					KeyPath:         keyPath,
+				}, nil
+			}
+		}
+		slog.Warn("TLS: cert paths in tls_settings not found on disk",
+			"cert", certPath, "key", keyPath)
+	}
+
+	// Try default cert paths.
+	defaultCert := "/root/.cert/server.crt"
+	defaultKey := "/root/.cert/server.key"
+	if _, err := os.Stat(defaultCert); err == nil {
+		if _, err := os.Stat(defaultKey); err == nil {
 			slog.Info("TLS: using default cert files",
-				"cert", certPath, "key", keyPath)
+				"cert", defaultCert, "key", defaultKey)
 			return &option.InboundTLSOptions{
 				Enabled:         true,
 				ServerName:      serverName,
-				CertificatePath: certPath,
-				KeyPath:         keyPath,
+				CertificatePath: defaultCert,
+				KeyPath:         defaultKey,
 			}, nil
 		}
 	}
