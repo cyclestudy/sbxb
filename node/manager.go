@@ -22,11 +22,10 @@ type Manager struct {
 	tracker     *core.TrafficTracker
 
 	// Stored for full reload on route changes.
-	lastCtx            context.Context
-	lastConfigs        []conf.NodeConfig
-	lastBlockSourceIPs []string
-	routeChangeCh      chan struct{}
-	reloadCancel       context.CancelFunc
+	lastCtx  context.Context
+	lastCfg  conf.Config
+	routeChangeCh chan struct{}
+	reloadCancel  context.CancelFunc
 
 	mu sync.Mutex
 }
@@ -41,14 +40,13 @@ func NewManager() *Manager {
 // then creates and starts a Controller for each node configuration.
 // If any controller fails to start, previously started controllers
 // are closed and an error is returned.
-func (m *Manager) Start(ctx context.Context, configs []conf.NodeConfig, blockSourceIPs []string) error {
+func (m *Manager) Start(ctx context.Context, cfg conf.Config) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	// Store for route-change full reload.
 	m.lastCtx = ctx
-	m.lastConfigs = configs
-	m.lastBlockSourceIPs = blockSourceIPs
+	m.lastCfg = cfg
 	m.routeChangeCh = make(chan struct{}, 1)
 
 	// 1. Pre-fetch node info for all nodes to collect route rules.
@@ -58,16 +56,16 @@ func (m *Manager) Start(ctx context.Context, configs []conf.NodeConfig, blockSou
 		client   *xboard.Client
 	}
 
-	fetched := make([]prefetch, 0, len(configs))
+	fetched := make([]prefetch, 0, len(cfg.Nodes))
 	var allRoutes []xboard.Route
 
-	for _, cfg := range configs {
-		client := xboard.NewClient(cfg.ApiHost, cfg.ApiKey, cfg.NodeID, cfg.NodeType, cfg.Timeout)
+	for _, nodeCfg := range cfg.Nodes {
+		client := xboard.NewClient(nodeCfg.ApiHost, nodeCfg.ApiKey, nodeCfg.NodeID, nodeCfg.NodeType, nodeCfg.Timeout)
 		nodeInfo, err := client.GetNodeInfo()
 		if err != nil {
-			return fmt.Errorf("manager: failed to pre-fetch node %d info: %w", cfg.NodeID, err)
+			return fmt.Errorf("manager: failed to pre-fetch node %d info: %w", nodeCfg.NodeID, err)
 		}
-		fetched = append(fetched, prefetch{config: cfg, nodeInfo: nodeInfo, client: client})
+		fetched = append(fetched, prefetch{config: nodeCfg, nodeInfo: nodeInfo, client: client})
 		allRoutes = append(allRoutes, nodeInfo.Routes...)
 	}
 
@@ -78,9 +76,13 @@ func (m *Manager) Start(ctx context.Context, configs []conf.NodeConfig, blockSou
 	m.core = core.New()
 
 	// 4. Build base options with direct + block outbounds and route rules.
+	logLevel := cfg.Log.Level
+	if logLevel == "" {
+		logLevel = "warning"
+	}
 	baseOpts := option.Options{
 		Log: &option.LogOptions{
-			Level: "warning",
+			Level: logLevel,
 		},
 		Outbounds: []option.Outbound{
 			{
@@ -107,8 +109,8 @@ func (m *Manager) Start(ctx context.Context, configs []conf.NodeConfig, blockSou
 	// Build source IP blocking rules from config.
 	var srcRules []option.Rule
 	var srcRuleSets []option.RuleSet
-	if len(blockSourceIPs) > 0 {
-		srcRules, srcRuleSets = core.BuildSourceIPRules(blockSourceIPs)
+	if len(cfg.BlockSourceIPs) > 0 {
+		srcRules, srcRuleSets = core.BuildSourceIPRules(cfg.BlockSourceIPs)
 	}
 
 	// Build route options.
@@ -252,7 +254,7 @@ func (m *Manager) watchRouteChanges(ctx context.Context) {
 		return
 	case <-m.routeChangeCh:
 		slog.Info("manager: route change detected, performing full reload")
-		if err := m.Reload(m.lastCtx, m.lastConfigs, m.lastBlockSourceIPs); err != nil {
+		if err := m.Reload(m.lastCtx, m.lastCfg); err != nil {
 			slog.Error("manager: route-change reload failed", "error", err)
 		}
 	}
@@ -261,12 +263,12 @@ func (m *Manager) watchRouteChanges(ctx context.Context) {
 // Reload tears down all controllers and the core, then restarts with
 // the new set of configurations. This is a full restart, not a hot
 // reload.
-func (m *Manager) Reload(ctx context.Context, configs []conf.NodeConfig, blockSourceIPs []string) error {
-	slog.Info("manager: reloading", "newNodeCount", len(configs))
+func (m *Manager) Reload(ctx context.Context, cfg conf.Config) error {
+	slog.Info("manager: reloading", "newNodeCount", len(cfg.Nodes))
 
 	m.Close()
 
-	if err := m.Start(ctx, configs, blockSourceIPs); err != nil {
+	if err := m.Start(ctx, cfg); err != nil {
 		return fmt.Errorf("manager: reload failed: %w", err)
 	}
 
