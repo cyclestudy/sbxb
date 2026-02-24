@@ -23,28 +23,30 @@ func (c *Client) GetNodeInfo() (*NodeInfo, error) {
 		return nil, nil
 	}
 
-	// The response wraps the node info in a "data" envelope.
+	// Try envelope format first: {"data": {...}}
 	var envelope struct {
 		Data *NodeInfo `json:"data"`
 	}
-
-	if err := json.Unmarshal(body, &envelope); err != nil {
-		// Try parsing directly as NodeInfo (some panels return flat response).
-		var info NodeInfo
-		if err2 := json.Unmarshal(body, &info); err2 != nil {
-			return nil, fmt.Errorf("failed to parse node info response: %w (also tried flat: %v)", err, err2)
-		}
-		slog.Debug("parsed node info (flat response)")
-		return &info, nil
+	if err := json.Unmarshal(body, &envelope); err == nil && envelope.Data != nil && envelope.Data.Protocol != "" {
+		slog.Debug("fetched node info",
+			"protocol", envelope.Data.Protocol,
+			"port", envelope.Data.ServerPort,
+		)
+		return envelope.Data, nil
 	}
 
-	if envelope.Data == nil {
+	// Flat format: {"protocol": "vless", ...}
+	var info NodeInfo
+	if err := json.Unmarshal(body, &info); err != nil {
+		return nil, fmt.Errorf("failed to parse node info response: %w", err)
+	}
+	if info.Protocol == "" {
 		return nil, fmt.Errorf("node info response contained no data")
 	}
 
-	slog.Debug("fetched node info",
-		"protocol", envelope.Data.Protocol,
-		"port", envelope.Data.ServerPort,
+	slog.Debug("fetched node info (flat)",
+		"protocol", info.Protocol,
+		"port", info.ServerPort,
 	)
-	return envelope.Data, nil
+	return &info, nil
 }

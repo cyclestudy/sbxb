@@ -7,8 +7,8 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 go build -tags "with_quic" \
-    -ldflags "-s -w -X github.com/sbxb-dev/sbxb/cmd/sbxb.version=$(git describe --tags --always 2>/dev/null || echo dev)" \
+RUN CGO_ENABLED=0 go build -tags "with_quic,with_utls" \
+    -ldflags "-s -w -X github.com/cyclestudy/sbxb/cmd/sbxb.version=$(git describe --tags --always 2>/dev/null || echo dev)" \
     -o /sbxb .
 
 FROM alpine:3.21

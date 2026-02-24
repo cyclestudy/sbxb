@@ -60,7 +60,7 @@ jobs:
           if [ -n "$GOARM" ]; then BINARY="${BINARY}v${GOARM}"; fi
           BINARY="${BINARY}${EXT}"
 
-          go build -tags "with_quic" \
+          go build -tags "with_quic,with_utls" \
             -ldflags "-s -w -X github.com/cyclestudy/sbxb/cmd/sbxb.version=${VERSION} -X github.com/cyclestudy/sbxb/cmd/sbxb.commit=${COMMIT}" \
             -o "${BINARY}" .
 
