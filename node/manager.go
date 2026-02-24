@@ -9,6 +9,7 @@ import (
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
 
+	"github.com/cyclestudy/sbxb/api/xboard"
 	"github.com/cyclestudy/sbxb/conf"
 	"github.com/cyclestudy/sbxb/core"
 )
@@ -37,10 +38,33 @@ func (m *Manager) Start(ctx context.Context, configs []conf.NodeConfig) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// 1. Create the sing-box core.
+	// 1. Pre-fetch node info for all nodes to collect route rules.
+	type prefetch struct {
+		config   conf.NodeConfig
+		nodeInfo *xboard.NodeInfo
+		client   *xboard.Client
+	}
+
+	fetched := make([]prefetch, 0, len(configs))
+	var allRoutes []xboard.Route
+
+	for _, cfg := range configs {
+		client := xboard.NewClient(cfg.ApiHost, cfg.ApiKey, cfg.NodeID, cfg.NodeType, cfg.Timeout)
+		nodeInfo, err := client.GetNodeInfo()
+		if err != nil {
+			return fmt.Errorf("manager: failed to pre-fetch node %d info: %w", cfg.NodeID, err)
+		}
+		fetched = append(fetched, prefetch{config: cfg, nodeInfo: nodeInfo, client: client})
+		allRoutes = append(allRoutes, nodeInfo.Routes...)
+	}
+
+	// 2. Build route rules from panel routes.
+	routeRules := core.BuildRouteRules(allRoutes)
+
+	// 3. Create the sing-box core.
 	m.core = core.New()
 
-	// 2. Build base options with direct + block outbounds.
+	// 4. Build base options with direct + block outbounds and route rules.
 	baseOpts := option.Options{
 		Log: &option.LogOptions{
 			Level: "warning",
@@ -64,22 +88,31 @@ func (m *Manager) Start(ctx context.Context, configs []conf.NodeConfig) error {
 		},
 	}
 
-	// 3. Start the core.
+	if len(routeRules) > 0 {
+		baseOpts.Route = &option.RouteOptions{
+			Rules: routeRules,
+			Final: "direct",
+		}
+		slog.Info("route rules configured", "count", len(routeRules))
+	}
+
+	// 5. Start the core.
 	if err := m.core.Start(baseOpts); err != nil {
 		return fmt.Errorf("manager: failed to start core: %w", err)
 	}
 
-	// 4. Create traffic tracker and register with the router.
+	// 6. Create traffic tracker and register with the router.
 	m.tracker = core.NewTrafficTracker()
 	m.core.SetTracker(m.tracker)
 
-	// 5. Create and start a controller for each node.
-	m.controllers = make([]*Controller, 0, len(configs))
-	for _, cfg := range configs {
-		ctrl := NewController(cfg, m.core, m.tracker)
+	// 7. Create and start a controller for each node (with pre-fetched info).
+	m.controllers = make([]*Controller, 0, len(fetched))
+	for _, f := range fetched {
+		ctrl := NewController(f.config, m.core, m.tracker)
+		ctrl.SetNodeInfo(f.nodeInfo)
 		if err := ctrl.Start(ctx); err != nil {
 			slog.Error("manager: failed to start controller, rolling back",
-				"nodeID", cfg.NodeID,
+				"nodeID", f.config.NodeID,
 				"error", err,
 			)
 			// Roll back: close already-started controllers and core.
@@ -88,10 +121,10 @@ func (m *Manager) Start(ctx context.Context, configs []conf.NodeConfig) error {
 			}
 			m.controllers = nil
 			_ = m.core.Close()
-			return fmt.Errorf("manager: node %d failed to start: %w", cfg.NodeID, err)
+			return fmt.Errorf("manager: node %d failed to start: %w", f.config.NodeID, err)
 		}
 		m.controllers = append(m.controllers, ctrl)
-		slog.Info("manager: controller started", "nodeID", cfg.NodeID)
+		slog.Info("manager: controller started", "nodeID", f.config.NodeID)
 	}
 
 	slog.Info("manager: all controllers started", "count", len(m.controllers))

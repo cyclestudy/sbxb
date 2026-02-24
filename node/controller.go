@@ -48,6 +48,12 @@ func NewController(nodeConfig conf.NodeConfig, c *core.Core, tracker *core.Traff
 	}
 }
 
+// SetNodeInfo pre-sets node info from the manager's pre-fetch,
+// so Controller.Start() skips the initial API call.
+func (ctrl *Controller) SetNodeInfo(info *xboard.NodeInfo) {
+	ctrl.nodeInfo = info
+}
+
 // Start initializes the node by fetching its configuration and user
 // list from the panel, building the sing-box inbound, and launching
 // periodic pull/push tasks.
@@ -57,17 +63,19 @@ func (ctrl *Controller) Start(ctx context.Context) error {
 
 	ctrl.ctx, ctrl.cancel = context.WithCancel(ctx)
 
-	// 1. Fetch initial node info.
-	nodeInfo, err := ctrl.client.GetNodeInfo()
-	if err != nil {
-		return fmt.Errorf("node %d: failed to fetch node info: %w", ctrl.nodeConfig.NodeID, err)
+	// 1. Fetch node info if not pre-set.
+	if ctrl.nodeInfo == nil {
+		nodeInfo, err := ctrl.client.GetNodeInfo()
+		if err != nil {
+			return fmt.Errorf("node %d: failed to fetch node info: %w", ctrl.nodeConfig.NodeID, err)
+		}
+		ctrl.nodeInfo = nodeInfo
 	}
-	ctrl.nodeInfo = nodeInfo
-	ctrl.tag = fmt.Sprintf("%s-%d", nodeInfo.Protocol, ctrl.nodeConfig.NodeID)
+	ctrl.tag = fmt.Sprintf("%s-%d", ctrl.nodeInfo.Protocol, ctrl.nodeConfig.NodeID)
 
 	slog.Info("node info fetched",
 		"nodeID", ctrl.nodeConfig.NodeID,
-		"protocol", nodeInfo.Protocol,
+		"protocol", ctrl.nodeInfo.Protocol,
 		"tag", ctrl.tag,
 	)
 
