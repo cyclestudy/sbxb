@@ -20,22 +20,33 @@ info()  { echo -e "${GREEN}[INFO]${NC} $1"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 
-detect_arch() {
-    case "$(uname -m)" in
-        x86_64|amd64) echo "amd64" ;;
-        aarch64|arm64) echo "arm64" ;;
-        armv7*) echo "armv7" ;;
-        *) error "Unsupported architecture: $(uname -m)" ;;
-    esac
-}
-
-detect_os() {
+detect_platform() {
+    local os arch
     case "$(uname -s)" in
-        Linux)   echo "linux" ;;
-        Darwin)  echo "darwin" ;;
-        FreeBSD) echo "freebsd" ;;
+        Linux)   os="linux" ;;
+        Darwin)  os="macos" ;;
+        FreeBSD) os="freebsd" ;;
         *) error "Unsupported OS: $(uname -s)" ;;
     esac
+
+    case "$(uname -m)" in
+        x86_64|amd64)     arch="64" ;;
+        i386|i686)        arch="32" ;;
+        aarch64|arm64)    arch="arm64-v8a" ;;
+        armv7*)           arch="arm32-v7a" ;;
+        armv6*)           arch="arm32-v6" ;;
+        armv5*|arm*)      arch="arm32-v5" ;;
+        mips64el|mips64le) arch="mips64le" ;;
+        mips64)           arch="mips64" ;;
+        mipsel|mipsle)    arch="mips32le" ;;
+        mips)             arch="mips32" ;;
+        ppc64le)          arch="ppc64le" ;;
+        riscv64)          arch="riscv64" ;;
+        s390x)            arch="s390x" ;;
+        *) error "Unsupported architecture: $(uname -m)" ;;
+    esac
+
+    echo "${os}-${arch}"
 }
 
 get_latest_version() {
@@ -50,18 +61,25 @@ get_current_version() {
 
 download_and_extract() {
     local version="$1"
-    local os=$(detect_os)
-    local arch=$(detect_arch)
-    local binary="sbxb-${os}-${arch}"
-    local url="https://github.com/${REPO}/releases/download/${version}/${binary}.tar.gz"
+    local platform
+    platform=$(detect_platform)
+    local name="sbxb-${platform}"
+    local url="https://github.com/${REPO}/releases/download/${version}/${name}.tar.gz"
 
-    info "Downloading ${version} for ${os}/${arch}..."
-    local tmpdir=$(mktemp -d)
-    curl -sL "$url" -o "${tmpdir}/${binary}.tar.gz" || error "Download failed"
-    tar -xzf "${tmpdir}/${binary}.tar.gz" -C "${tmpdir}" || error "Extract failed"
+    info "Downloading ${version} for ${platform}..."
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    curl -sL "$url" -o "${tmpdir}/archive.tar.gz" || error "Download failed"
+
+    # Verify it's actually gzip
+    if ! file "${tmpdir}/archive.tar.gz" | grep -qi gzip; then
+        error "Downloaded file is not a valid gzip archive. Check if this platform is supported."
+    fi
+
+    tar -xzf "${tmpdir}/archive.tar.gz" -C "${tmpdir}" || error "Extract failed"
 
     mkdir -p "$INSTALL_DIR"
-    cp "${tmpdir}/${binary}" "${INSTALL_DIR}/sbxb"
+    cp "${tmpdir}/${name}" "${INSTALL_DIR}/sbxb"
     chmod +x "${INSTALL_DIR}/sbxb"
     ln -sf "${INSTALL_DIR}/sbxb" /usr/local/bin/sbxb
 
@@ -115,6 +133,8 @@ ExecStart=${INSTALL_DIR}/sbxb server -c ${CONFIG_DIR}/config.json
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=1048576
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
