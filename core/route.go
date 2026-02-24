@@ -67,6 +67,7 @@ func BuildRouteRules(routes []xboard.Route) RouteResult {
 							DownloadDetour: "direct",
 						},
 					})
+					// Block destination IPs (prevent proxy forwarding to this geo).
 					result.Rules = append(result.Rules, option.Rule{
 						Type: C.RuleTypeDefault,
 						DefaultOptions: option.DefaultRule{
@@ -76,7 +77,18 @@ func BuildRouteRules(routes []xboard.Route) RouteResult {
 							RuleAction: blockAction(),
 						},
 					})
-					slog.Info("route rule: block geoip via rule_set", "id", r.ID, "code", code)
+					// Block source IPs (prevent connections from this geo).
+					result.Rules = append(result.Rules, option.Rule{
+						Type: C.RuleTypeDefault,
+						DefaultOptions: option.DefaultRule{
+							RawDefaultRule: option.RawDefaultRule{
+								RuleSet:                  badoption.Listable[string]{tag},
+								RuleSetIPCIDRMatchSource: true,
+							},
+							RuleAction: blockAction(),
+						},
+					})
+					slog.Info("route rule: block geoip (src+dst) via rule_set", "id", r.ID, "code", code)
 				} else {
 					// Plain IP CIDR.
 					result.Rules = append(result.Rules, option.Rule{
