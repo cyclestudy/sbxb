@@ -14,8 +14,9 @@ import (
 
 // Config is the top-level configuration structure.
 type Config struct {
-	Log   LogConfig    `json:"log" mapstructure:"log"`
-	Nodes []NodeConfig `json:"nodes" mapstructure:"nodes"`
+	Log            LogConfig    `json:"log" mapstructure:"log"`
+	BlockSourceIPs []string     `json:"block_source_ips" mapstructure:"block_source_ips"`
+	Nodes          []NodeConfig `json:"nodes" mapstructure:"nodes"`
 }
 
 // LogConfig controls logging behavior.

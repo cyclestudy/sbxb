@@ -67,7 +67,6 @@ func BuildRouteRules(routes []xboard.Route) RouteResult {
 							DownloadDetour: "direct",
 						},
 					})
-					// Block destination IPs (prevent proxy forwarding to this geo).
 					result.Rules = append(result.Rules, option.Rule{
 						Type: C.RuleTypeDefault,
 						DefaultOptions: option.DefaultRule{
@@ -77,18 +76,7 @@ func BuildRouteRules(routes []xboard.Route) RouteResult {
 							RuleAction: blockAction(),
 						},
 					})
-					// Block source IPs (prevent connections from this geo).
-					result.Rules = append(result.Rules, option.Rule{
-						Type: C.RuleTypeDefault,
-						DefaultOptions: option.DefaultRule{
-							RawDefaultRule: option.RawDefaultRule{
-								RuleSet:                  badoption.Listable[string]{tag},
-								RuleSetIPCIDRMatchSource: true,
-							},
-							RuleAction: blockAction(),
-						},
-					})
-					slog.Info("route rule: block geoip (src+dst) via rule_set", "id", r.ID, "code", code)
+					slog.Info("route rule: block geoip via rule_set", "id", r.ID, "code", code)
 				} else {
 					// Plain IP CIDR.
 					result.Rules = append(result.Rules, option.Rule{
@@ -308,6 +296,50 @@ func blockAction() option.RuleAction {
 			Outbound: "block",
 		},
 	}
+}
+
+// BuildSourceIPRules creates route rules and rule_sets that block
+// incoming connections from the specified source IPs/GeoIPs.
+// Supports "geoip:XX" format and plain IP CIDRs.
+func BuildSourceIPRules(sources []string) (rules []option.Rule, ruleSets []option.RuleSet) {
+	for _, s := range sources {
+		if strings.HasPrefix(s, "geoip:") {
+			code := strings.TrimPrefix(s, "geoip:")
+			tag := "geoip-" + code
+			ruleSets = append(ruleSets, option.RuleSet{
+				Type:   C.RuleSetTypeRemote,
+				Tag:    tag,
+				Format: C.RuleSetFormatBinary,
+				RemoteOptions: option.RemoteRuleSet{
+					URL:            "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-" + code + ".srs",
+					DownloadDetour: "direct",
+				},
+			})
+			rules = append(rules, option.Rule{
+				Type: C.RuleTypeDefault,
+				DefaultOptions: option.DefaultRule{
+					RawDefaultRule: option.RawDefaultRule{
+						RuleSet:                  badoption.Listable[string]{tag},
+						RuleSetIPCIDRMatchSource: true,
+					},
+					RuleAction: blockAction(),
+				},
+			})
+			slog.Info("source ip rule: block geoip", "code", code)
+		} else {
+			rules = append(rules, option.Rule{
+				Type: C.RuleTypeDefault,
+				DefaultOptions: option.DefaultRule{
+					RawDefaultRule: option.RawDefaultRule{
+						SourceIPCIDR: badoption.Listable[string]{s},
+					},
+					RuleAction: blockAction(),
+				},
+			})
+			slog.Info("source ip rule: block cidr", "cidr", s)
+		}
+	}
+	return
 }
 
 // v2rayOutConfig is the format XBoard uses for default_out action_value.

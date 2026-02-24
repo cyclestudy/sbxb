@@ -46,7 +46,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 
 	// Create and start the node manager.
 	mgr := node.NewManager()
-	if err := mgr.Start(ctx, cfg.Nodes); err != nil {
+	if err := mgr.Start(ctx, cfg.Nodes, cfg.BlockSourceIPs); err != nil {
 		return err
 	}
 
@@ -58,7 +58,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 			slog.Error("failed to reload config", "error", err)
 			return
 		}
-		if err := mgr.Reload(ctx, newCfg.Nodes); err != nil {
+		if err := mgr.Reload(ctx, newCfg.Nodes, newCfg.BlockSourceIPs); err != nil {
 			slog.Error("failed to apply reloaded config", "error", err)
 		}
 	})

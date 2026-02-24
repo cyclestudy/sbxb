@@ -3,6 +3,7 @@
         "level": "info",
         "output": ""
     },
+    "block_source_ips": ["geoip:cn"],
     "nodes": [
         {
             "api_host": "https://your-xboard-panel.com",
