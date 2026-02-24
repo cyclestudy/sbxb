@@ -18,28 +18,86 @@ jobs:
     strategy:
       matrix:
         include:
+          # Linux
           - goos: linux
             goarch: amd64
+            name: linux-64
+          - goos: linux
+            goarch: "386"
+            name: linux-32
           - goos: linux
             goarch: arm64
+            name: linux-arm64-v8a
           - goos: linux
             goarch: arm
             goarm: "7"
-          - goos: darwin
-            goarch: amd64
-          - goos: darwin
-            goarch: arm64
-          - goos: windows
-            goarch: amd64
+            name: linux-arm32-v7a
+          - goos: linux
+            goarch: arm
+            goarm: "6"
+            name: linux-arm32-v6
+          - goos: linux
+            goarch: arm
+            goarm: "5"
+            name: linux-arm32-v5
+          - goos: linux
+            goarch: mips
+            gomips: softfloat
+            name: linux-mips32
+          - goos: linux
+            goarch: mipsle
+            gomips: softfloat
+            name: linux-mips32le
+          - goos: linux
+            goarch: mips64
+            name: linux-mips64
+          - goos: linux
+            goarch: mips64le
+            name: linux-mips64le
+          - goos: linux
+            goarch: ppc64le
+            name: linux-ppc64le
+          - goos: linux
+            goarch: riscv64
+            name: linux-riscv64
+          - goos: linux
+            goarch: s390x
+            name: linux-s390x
+          # FreeBSD
           - goos: freebsd
             goarch: amd64
+            name: freebsd-64
+          - goos: freebsd
+            goarch: "386"
+            name: freebsd-32
+          - goos: freebsd
+            goarch: arm64
+            name: freebsd-arm64-v8a
+          - goos: freebsd
+            goarch: arm
+            goarm: "7"
+            name: freebsd-arm32-v7a
+          # macOS
+          - goos: darwin
+            goarch: amd64
+            name: macos-64
+          - goos: darwin
+            goarch: arm64
+            name: macos-arm64-v8a
+          # Windows
+          - goos: windows
+            goarch: amd64
+            name: windows-64
+          - goos: windows
+            goarch: "386"
+            name: windows-32
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.23'
 
       - name: Download dependencies
         run: go mod download
@@ -49,6 +107,7 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           GOARM: ${{ matrix.goarm }}
+          GOMIPS: ${{ matrix.gomips }}
           CGO_ENABLED: "0"
         run: |
           VERSION=${GITHUB_REF#refs/tags/}
@@ -56,25 +115,25 @@ jobs:
           EXT=""
           if [ "$GOOS" = "windows" ]; then EXT=".exe"; fi
 
-          BINARY="sbxb-${GOOS}-${GOARCH}"
-          if [ -n "$GOARM" ]; then BINARY="${BINARY}v${GOARM}"; fi
-          BINARY="${BINARY}${EXT}"
+          BINARY="sbxb-${{ matrix.name }}${EXT}"
 
           go build -tags "with_quic,with_utls" \
             -ldflags "-s -w -X github.com/cyclestudy/sbxb/cmd/sbxb.version=${VERSION} -X github.com/cyclestudy/sbxb/cmd/sbxb.commit=${COMMIT}" \
             -o "${BINARY}" .
 
           if [ "$GOOS" != "windows" ]; then
-            tar -czf "${BINARY%.exe}.tar.gz" "${BINARY}" config.json.example
+            tar -czf "sbxb-${{ matrix.name }}.tar.gz" "${BINARY}" config.json.example
           else
-            zip "${BINARY%.exe}.zip" "${BINARY}" config.json.example
+            zip "sbxb-${{ matrix.name }}.zip" "${BINARY}" config.json.example
           fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: sbxb-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goarm && format('v{0}', matrix.goarm) || '' }}
-          path: sbxb-*.*
+          name: sbxb-${{ matrix.name }}
+          path: |
+            sbxb-*.tar.gz
+            sbxb-*.zip
 
   release:
     needs: build
@@ -85,8 +144,14 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          sha256sum sbxb-* > checksums.txt
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/*
+          files: |
+            artifacts/*
           generate_release_notes: true

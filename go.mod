@@ -1,6 +1,6 @@
 module github.com/cyclestudy/sbxb
 
-go 1.24.0
+go 1.23.1
 
 require (
 	github.com/fsnotify/fsnotify v1.9.0
