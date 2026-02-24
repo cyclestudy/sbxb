@@ -11,6 +11,10 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      GOPRIVATE: "github.com/cyclestudy/*"
+      GONOSUMDB: "*"
+      GONOSUMCHECK: "*"
     strategy:
       matrix:
         include:
@@ -36,6 +40,14 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.24'
+          cache: false
+
+      - name: Download dependencies
+        run: |
+          go env
+          cat go.mod | head -3
+          ls cmd/sbxb/
+          go mod download
 
       - name: Build
         env:
