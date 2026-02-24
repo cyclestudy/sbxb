@@ -126,6 +126,31 @@ func (m *Manager) Start(ctx context.Context, configs []conf.NodeConfig) error {
 		)
 	}
 
+	// Build DNS options if custom DNS rules exist.
+	if len(routeResult.DNSServers) > 0 {
+		// Always include a local DNS server as fallback.
+		servers := []option.DNSServerOptions{
+			{
+				Type:    C.DNSTypeLocal,
+				Tag:     "local-dns",
+				Options: &option.LocalDNSServerOptions{},
+			},
+		}
+		servers = append(servers, routeResult.DNSServers...)
+
+		baseOpts.DNS = &option.DNSOptions{
+			RawDNSOptions: option.RawDNSOptions{
+				Servers: servers,
+				Rules:   routeResult.DNSRules,
+				Final:   "local-dns",
+			},
+		}
+		slog.Info("dns configured",
+			"servers", len(servers),
+			"rules", len(routeResult.DNSRules),
+		)
+	}
+
 	// 5. Start the core.
 	if err := m.core.Start(baseOpts); err != nil {
 		return fmt.Errorf("manager: failed to start core: %w", err)

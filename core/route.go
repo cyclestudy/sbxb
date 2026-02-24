@@ -2,7 +2,9 @@ package core
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 
 	C "github.com/sagernet/sing-box/constant"
@@ -19,6 +21,10 @@ type RouteResult struct {
 	Outbounds []option.Outbound
 	Final     string // default outbound tag, empty = "direct"
 	NeedSniff bool   // whether protocol sniffing is required
+
+	// DNS configuration from "dns" action rules.
+	DNSServers []option.DNSServerOptions
+	DNSRules   []option.DNSRule
 }
 
 // BuildRouteRules converts XBoard panel routes into sing-box route rules,
@@ -123,11 +129,156 @@ func BuildRouteRules(routes []xboard.Route) RouteResult {
 			slog.Info("route rule: direct domains", "id", r.ID, "count", len(r.Match))
 
 		case "default_out":
-			outbound, tag := parseDefaultOut(r.ActionValue)
+			outbound, tag := parseOutbound(r.ActionValue, "default-out")
 			if outbound != nil {
 				result.Outbounds = append(result.Outbounds, *outbound)
 				result.Final = tag
 				slog.Info("route rule: default outbound", "id", r.ID, "tag", tag)
+			}
+
+		case "dns":
+			if r.ActionValue == "" || len(r.Match) == 0 {
+				continue
+			}
+			serverTag := fmt.Sprintf("dns-%d", r.ID)
+			result.DNSServers = append(result.DNSServers, option.DNSServerOptions{
+				Type: C.DNSTypeUDP,
+				Tag:  serverTag,
+				Options: &option.RemoteDNSServerOptions{
+					DNSServerAddressOptions: option.DNSServerAddressOptions{
+						Server: r.ActionValue,
+					},
+				},
+			})
+			result.DNSRules = append(result.DNSRules, option.DNSRule{
+				Type: C.RuleTypeDefault,
+				DefaultOptions: option.DefaultDNSRule{
+					RawDefaultDNSRule: option.RawDefaultDNSRule{
+						DomainSuffix: badoption.Listable[string](r.Match),
+					},
+					DNSRuleAction: option.DNSRuleAction{
+						Action: C.RuleActionTypeRoute,
+						RouteOptions: option.DNSRouteActionOptions{
+							Server: serverTag,
+						},
+					},
+				},
+			})
+			slog.Info("route rule: dns", "id", r.ID, "server", r.ActionValue, "domains", len(r.Match))
+
+		case "block_port":
+			if len(r.Match) == 0 {
+				continue
+			}
+			var ports badoption.Listable[uint16]
+			var portRanges badoption.Listable[string]
+			for _, m := range r.Match {
+				if strings.Contains(m, "-") {
+					portRanges = append(portRanges, m)
+				} else {
+					p, err := strconv.ParseUint(m, 10, 16)
+					if err != nil {
+						slog.Warn("block_port: invalid port number", "port", m, "id", r.ID)
+						continue
+					}
+					ports = append(ports, uint16(p))
+				}
+			}
+			if len(ports) > 0 || len(portRanges) > 0 {
+				result.Rules = append(result.Rules, option.Rule{
+					Type: C.RuleTypeDefault,
+					DefaultOptions: option.DefaultRule{
+						RawDefaultRule: option.RawDefaultRule{
+							Port:      ports,
+							PortRange: portRanges,
+						},
+						RuleAction: blockAction(),
+					},
+				})
+				slog.Info("route rule: block ports", "id", r.ID, "ports", len(ports), "ranges", len(portRanges))
+			}
+
+		case "route":
+			if len(r.Match) == 0 || r.ActionValue == "" {
+				continue
+			}
+			fallbackTag := fmt.Sprintf("route-%d", r.ID)
+			outbound, tag := parseOutbound(r.ActionValue, fallbackTag)
+			if outbound == nil {
+				continue
+			}
+			result.Outbounds = append(result.Outbounds, *outbound)
+			result.Rules = append(result.Rules, option.Rule{
+				Type: C.RuleTypeDefault,
+				DefaultOptions: option.DefaultRule{
+					RawDefaultRule: option.RawDefaultRule{
+						DomainSuffix: badoption.Listable[string](r.Match),
+					},
+					RuleAction: option.RuleAction{
+						Action: C.RuleActionTypeRoute,
+						RouteOptions: option.RouteActionOptions{
+							Outbound: tag,
+						},
+					},
+				},
+			})
+			slog.Info("route rule: route domains", "id", r.ID, "tag", tag, "domains", len(r.Match))
+
+		case "route_ip":
+			if len(r.Match) == 0 || r.ActionValue == "" {
+				continue
+			}
+			fallbackTag := fmt.Sprintf("route-ip-%d", r.ID)
+			outbound, tag := parseOutbound(r.ActionValue, fallbackTag)
+			if outbound == nil {
+				continue
+			}
+			result.Outbounds = append(result.Outbounds, *outbound)
+			for _, m := range r.Match {
+				if strings.HasPrefix(m, "geoip:") {
+					code := strings.TrimPrefix(m, "geoip:")
+					rsTag := "geoip-" + code
+					result.RuleSets = append(result.RuleSets, option.RuleSet{
+						Type:   C.RuleSetTypeRemote,
+						Tag:    rsTag,
+						Format: C.RuleSetFormatBinary,
+						RemoteOptions: option.RemoteRuleSet{
+							URL:            "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-" + code + ".srs",
+							DownloadDetour: "direct",
+						},
+					})
+					result.Rules = append(result.Rules, option.Rule{
+						Type: C.RuleTypeDefault,
+						DefaultOptions: option.DefaultRule{
+							RawDefaultRule: option.RawDefaultRule{
+								RuleSet: badoption.Listable[string]{rsTag},
+							},
+							RuleAction: option.RuleAction{
+								Action: C.RuleActionTypeRoute,
+								RouteOptions: option.RouteActionOptions{
+									Outbound: tag,
+								},
+							},
+						},
+					})
+					slog.Info("route rule: route geoip via rule_set", "id", r.ID, "code", code, "tag", tag)
+				} else {
+					result.Rules = append(result.Rules, option.Rule{
+						Type: C.RuleTypeDefault,
+						DefaultOptions: option.DefaultRule{
+							RawDefaultRule: option.RawDefaultRule{
+								IPCIDR: badoption.Listable[string]{m},
+							},
+							RuleAction: option.RuleAction{
+								Action: C.RuleActionTypeRoute,
+								RouteOptions: option.RouteActionOptions{
+									Outbound: tag,
+								},
+							},
+						},
+					})
+					slog.Info("route rule: route ip cidr", "id", r.ID, "cidr", m, "tag", tag)
+				}
 			}
 
 		default:
@@ -163,20 +314,20 @@ type v2rayOutConfig struct {
 	} `json:"settings"`
 }
 
-func parseDefaultOut(actionValue string) (*option.Outbound, string) {
+func parseOutbound(actionValue, fallbackTag string) (*option.Outbound, string) {
 	if actionValue == "" {
 		return nil, ""
 	}
 
 	var cfg v2rayOutConfig
 	if err := json.Unmarshal([]byte(actionValue), &cfg); err != nil {
-		slog.Error("failed to parse default_out config", "error", err)
+		slog.Error("failed to parse outbound config", "error", err)
 		return nil, ""
 	}
 
 	tag := cfg.Tag
 	if tag == "" {
-		tag = "default-out"
+		tag = fallbackTag
 	}
 
 	switch cfg.Protocol {
