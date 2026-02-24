@@ -59,7 +59,7 @@ func (m *Manager) Start(ctx context.Context, configs []conf.NodeConfig) error {
 	}
 
 	// 2. Build route rules from panel routes.
-	routeRules := core.BuildRouteRules(allRoutes)
+	routeResult := core.BuildRouteRules(allRoutes)
 
 	// 3. Create the sing-box core.
 	m.core = core.New()
@@ -88,12 +88,42 @@ func (m *Manager) Start(ctx context.Context, configs []conf.NodeConfig) error {
 		},
 	}
 
-	if len(routeRules) > 0 {
-		baseOpts.Route = &option.RouteOptions{
-			Rules: routeRules,
-			Final: "direct",
+	// Add extra outbounds (e.g. default_out SOCKS proxy).
+	baseOpts.Outbounds = append(baseOpts.Outbounds, routeResult.Outbounds...)
+
+	// Build route options.
+	if len(routeResult.Rules) > 0 || routeResult.NeedSniff {
+		var rules []option.Rule
+
+		// Add sniff rule first if protocol detection is needed.
+		if routeResult.NeedSniff {
+			rules = append(rules, option.Rule{
+				Type: C.RuleTypeDefault,
+				DefaultOptions: option.DefaultRule{
+					RuleAction: option.RuleAction{
+						Action: C.RuleActionTypeSniff,
+					},
+				},
+			})
 		}
-		slog.Info("route rules configured", "count", len(routeRules))
+
+		rules = append(rules, routeResult.Rules...)
+
+		finalOut := "direct"
+		if routeResult.Final != "" {
+			finalOut = routeResult.Final
+		}
+
+		baseOpts.Route = &option.RouteOptions{
+			Rules:   rules,
+			RuleSet: routeResult.RuleSets,
+			Final:   finalOut,
+		}
+		slog.Info("route configured",
+			"rules", len(rules),
+			"final", finalOut,
+			"sniff", routeResult.NeedSniff,
+		)
 	}
 
 	// 5. Start the core.
