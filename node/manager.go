@@ -21,6 +21,12 @@ type Manager struct {
 	core        *core.Core
 	tracker     *core.TrafficTracker
 
+	// Stored for full reload on route changes.
+	lastCtx     context.Context
+	lastConfigs []conf.NodeConfig
+	routeChangeCh chan struct{}
+	reloadCancel  context.CancelFunc
+
 	mu sync.Mutex
 }
 
@@ -37,6 +43,11 @@ func NewManager() *Manager {
 func (m *Manager) Start(ctx context.Context, configs []conf.NodeConfig) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// Store for route-change full reload.
+	m.lastCtx = ctx
+	m.lastConfigs = configs
+	m.routeChangeCh = make(chan struct{}, 1)
 
 	// 1. Pre-fetch node info for all nodes to collect route rules.
 	type prefetch struct {
@@ -164,6 +175,7 @@ func (m *Manager) Start(ctx context.Context, configs []conf.NodeConfig) error {
 	m.controllers = make([]*Controller, 0, len(fetched))
 	for _, f := range fetched {
 		ctrl := NewController(f.config, m.core, m.tracker)
+		ctrl.routeChangeCh = m.routeChangeCh
 		ctrl.SetNodeInfo(f.nodeInfo)
 		if err := ctrl.Start(ctx); err != nil {
 			slog.Error("manager: failed to start controller, rolling back",
@@ -183,6 +195,12 @@ func (m *Manager) Start(ctx context.Context, configs []conf.NodeConfig) error {
 	}
 
 	slog.Info("manager: all controllers started", "count", len(m.controllers))
+
+	// Launch route-change watcher.
+	reloadCtx, reloadCancel := context.WithCancel(ctx)
+	m.reloadCancel = reloadCancel
+	go m.watchRouteChanges(reloadCtx)
+
 	return nil
 }
 
@@ -190,6 +208,11 @@ func (m *Manager) Start(ctx context.Context, configs []conf.NodeConfig) error {
 func (m *Manager) Close() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	if m.reloadCancel != nil {
+		m.reloadCancel()
+		m.reloadCancel = nil
+	}
 
 	for _, ctrl := range m.controllers {
 		ctrl.Close()
@@ -204,6 +227,20 @@ func (m *Manager) Close() {
 	}
 
 	slog.Info("manager: closed")
+}
+
+// watchRouteChanges waits for a route-change signal from any controller
+// and triggers a full Manager reload.
+func (m *Manager) watchRouteChanges(ctx context.Context) {
+	select {
+	case <-ctx.Done():
+		return
+	case <-m.routeChangeCh:
+		slog.Info("manager: route change detected, performing full reload")
+		if err := m.Reload(m.lastCtx, m.lastConfigs); err != nil {
+			slog.Error("manager: route-change reload failed", "error", err)
+		}
+	}
 }
 
 // Reload tears down all controllers and the core, then restarts with

@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -22,9 +23,13 @@ type Controller struct {
 	tracker    *core.TrafficTracker
 	limiter    *limiter.Limiter
 
-	nodeInfo *xboard.NodeInfo
-	users    []xboard.UserInfo
-	tag      string // inbound tag: "{protocol}-{nodeID}"
+	nodeInfo   *xboard.NodeInfo
+	routesHash string // JSON hash of current routes for change detection
+	users      []xboard.UserInfo
+	tag        string // inbound tag: "{protocol}-{nodeID}"
+
+	// routeChangeCh is set by Manager to receive route-change signals.
+	routeChangeCh chan<- struct{}
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -52,6 +57,13 @@ func NewController(nodeConfig conf.NodeConfig, c *core.Core, tracker *core.Traff
 // so Controller.Start() skips the initial API call.
 func (ctrl *Controller) SetNodeInfo(info *xboard.NodeInfo) {
 	ctrl.nodeInfo = info
+	ctrl.routesHash = hashRoutes(info.Routes)
+}
+
+// hashRoutes returns a JSON string of routes for change detection.
+func hashRoutes(routes []xboard.Route) string {
+	b, _ := json.Marshal(routes)
+	return string(b)
 }
 
 // Start initializes the node by fetching its configuration and user

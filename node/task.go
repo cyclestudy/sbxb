@@ -50,9 +50,23 @@ func (ctrl *Controller) nodeInfoMonitor(ctx context.Context) error {
 
 	needReload := false
 	if newNodeInfo != nil {
+		// Check if routes changed (requires full manager reload).
+		newHash := hashRoutes(newNodeInfo.Routes)
 		ctrl.mu.Lock()
+		oldHash := ctrl.routesHash
 		ctrl.nodeInfo = newNodeInfo
+		ctrl.routesHash = newHash
 		ctrl.mu.Unlock()
+
+		if newHash != oldHash && ctrl.routeChangeCh != nil {
+			slog.Info("route rules changed, requesting full reload", "nodeID", nodeID)
+			select {
+			case ctrl.routeChangeCh <- struct{}{}:
+			default:
+			}
+			return nil // skip inbound reload, full reload will handle it
+		}
+
 		needReload = true
 		slog.Info("node info updated", "nodeID", nodeID)
 	}
