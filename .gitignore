@@ -1,0 +1,25 @@
+# Binaries
+sbxb
+sbxb-*
+*.exe
+
+# Build
+dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go
+vendor/
+
+# Certs
+*.pem
+*.crt
+*.key
