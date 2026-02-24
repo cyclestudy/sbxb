@@ -10,6 +10,9 @@ import (
 var rootCmd = &cobra.Command{
 	Use:   "sbxb",
 	Short: "sing-box node backend for XBoard",
+	Run: func(cmd *cobra.Command, args []string) {
+		showMenu()
+	},
 }
 
 func Execute() {
