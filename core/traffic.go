@@ -122,6 +122,13 @@ func (c *countConn) Write(b []byte) (n int, err error) {
 	return
 }
 
+// Upstream returns the inner connection, allowing sing-box's
+// common.Cast to traverse the wrapper chain and discover protocol-
+// specific interfaces like HandshakeSuccess (needed by Hysteria2/TUIC).
+func (c *countConn) Upstream() any {
+	return c.Conn
+}
+
 // ---------------------------------------------------------------------------
 // countPacketConn wraps N.PacketConn to count bytes per packet.
 // ---------------------------------------------------------------------------
@@ -147,4 +154,9 @@ func (c *countPacketConn) WritePacket(buffer *buf.Buffer, destination M.Socksadd
 		c.storage.GetOrCreate(c.user).AddUpload(int64(n))
 	}
 	return err
+}
+
+// Upstream returns the inner packet connection for wrapper traversal.
+func (c *countPacketConn) Upstream() any {
+	return c.PacketConn
 }
