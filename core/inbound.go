@@ -2,7 +2,6 @@ package core
 
 import (
 	"encoding/base64"
-	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net/netip"
@@ -420,30 +419,16 @@ func sip022KeySize(method string) int {
 // deriveSSUserKey converts a UUID string to a base64-encoded Shadowsocks
 // sub-key for SIP022 multi-user mode.
 //
-// Standard UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx) is parsed to 16 raw
-// bytes.  For 16-byte ciphers the full UUID is used; for 32-byte ciphers the
-// UUID bytes are repeated to fill the key.
+// This follows the XBoard / V2bX convention: take the first keySize bytes
+// of the UUID string as raw ASCII (including dashes) and base64-encode them.
 //
-// If the UUID is not valid hex (e.g. it is already a base64 key provided
-// directly by the panel) it is returned as-is.
+// For 2022-blake3-aes-128-gcm (16 bytes): uuid[:16]
+// For 2022-blake3-aes-256-gcm (32 bytes): uuid[:32]
 func deriveSSUserKey(uuid string, keySize int) string {
-	clean := strings.ReplaceAll(uuid, "-", "")
-	uuidBytes, err := hex.DecodeString(clean)
-	if err != nil || len(uuidBytes) == 0 {
-		// Not a hex UUID -- assume the panel provided a ready-made key.
-		return uuid
+	if len(uuid) < keySize {
+		return base64.StdEncoding.EncodeToString([]byte(uuid))
 	}
-
-	if keySize <= len(uuidBytes) {
-		return base64.StdEncoding.EncodeToString(uuidBytes[:keySize])
-	}
-
-	// Key is longer than the UUID bytes.  Repeat to fill.
-	key := make([]byte, keySize)
-	for i := range key {
-		key[i] = uuidBytes[i%len(uuidBytes)]
-	}
-	return base64.StdEncoding.EncodeToString(key)
+	return base64.StdEncoding.EncodeToString([]byte(uuid[:keySize]))
 }
 
 func buildShadowsocks(nodeInfo *xboard.NodeInfo, users []xboard.UserInfo, tag string) (*option.Inbound, error) {
