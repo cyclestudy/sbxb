@@ -118,22 +118,14 @@ jobs:
           BINARY="sbxb-${{ matrix.name }}${EXT}"
 
           go build -tags "with_quic,with_utls" \
-            -ldflags "-s -w -X github.com/cyclestudy/sbxb/cmd/sbxb.version=${VERSION} -X github.com/cyclestudy/sbxb/cmd/sbxb.commit=${COMMIT}" \
+            -ldflags "-s -w -X github.com/cyclestudy/sbxb/cmd/sbxb.version=${VERSION} -X github.com/cyclestudy/sbxb/cmd/sbxb.commit=${COMMIT} -X github.com/cyclestudy/sbxb/cmd/sbxb.platformName=${{ matrix.name }}" \
             -o "${BINARY}" .
-
-          if [ "$GOOS" != "windows" ]; then
-            tar -czf "sbxb-${{ matrix.name }}.tar.gz" "${BINARY}" config.json.example
-          else
-            zip "sbxb-${{ matrix.name }}.zip" "${BINARY}" config.json.example
-          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: sbxb-${{ matrix.name }}
-          path: |
-            sbxb-*.tar.gz
-            sbxb-*.zip
+          path: sbxb-*
 
   release:
     needs: build

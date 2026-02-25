@@ -64,28 +64,24 @@ download_and_extract() {
     local platform
     platform=$(detect_platform)
     local name="sbxb-${platform}"
-    local url="https://github.com/${REPO}/releases/download/${version}/${name}.tar.gz"
+    local url="https://github.com/${REPO}/releases/download/${version}/${name}"
 
     info "Downloading ${version} for ${platform}..."
-    local tmpdir
-    tmpdir=$(mktemp -d)
-    curl -sL "$url" -o "${tmpdir}/archive.tar.gz" || error "Download failed"
-
-    # Verify it's actually gzip (magic bytes: 1f 8b)
-    local magic
-    magic=$(od -A n -t x1 -N 2 "${tmpdir}/archive.tar.gz" | tr -d ' ')
-    if [ "$magic" != "1f8b" ]; then
-        error "Downloaded file is not a valid gzip archive. Check if this platform is supported."
-    fi
-
-    tar -xzf "${tmpdir}/archive.tar.gz" -C "${tmpdir}" || error "Extract failed"
-
     mkdir -p "$INSTALL_DIR"
-    cp "${tmpdir}/${name}" "${INSTALL_DIR}/sbxb"
+    curl -sL "$url" -o "${INSTALL_DIR}/sbxb" || error "Download failed"
+
+    # Verify it's actually an ELF/Mach-O binary (not a 404 HTML page)
+    local magic
+    magic=$(od -A n -t x1 -N 4 "${INSTALL_DIR}/sbxb" | tr -d ' ')
+    case "$magic" in
+        7f454c46) ;;  # ELF
+        feedface|feedfacf|cafebabe) ;;  # Mach-O
+        4d5a*) ;;  # MZ (Windows PE)
+        *) rm -f "${INSTALL_DIR}/sbxb"; error "Downloaded file is not a valid binary. Check if this platform is supported." ;;
+    esac
+
     chmod +x "${INSTALL_DIR}/sbxb"
     ln -sf "${INSTALL_DIR}/sbxb" /usr/local/bin/sbxb
-
-    rm -rf "$tmpdir"
 }
 
 install() {

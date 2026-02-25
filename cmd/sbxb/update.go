@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -58,16 +57,11 @@ func doUpdate() {
 	fmt.Printf("Current: %s -> Latest: %s\n", version, release.TagName)
 
 	// 2. Build download URL.
-	arch := runtime.GOARCH
-	if arch == "arm" {
-		arch = "armv7"
-	}
-	name := fmt.Sprintf("sbxb-%s-%s", runtime.GOOS, arch)
-	ext := ".tar.gz"
+	name := "sbxb-" + getPlatformName()
 	if runtime.GOOS == "windows" {
-		ext = ".zip"
+		name += ".exe"
 	}
-	url := fmt.Sprintf("https://github.com/%s/releases/download/%s/%s%s", repo, release.TagName, name, ext)
+	url := fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", repo, release.TagName, name)
 
 	fmt.Printf("Downloading %s...\n", url)
 
@@ -84,39 +78,23 @@ func doUpdate() {
 		return
 	}
 
-	tmpDir, err := os.MkdirTemp("", "sbxb-update-*")
-	if err != nil {
-		fmt.Printf("Failed to create temp dir: %v\n", err)
-		return
-	}
-	defer os.RemoveAll(tmpDir)
-
-	archivePath := filepath.Join(tmpDir, name+ext)
-	f, err := os.Create(archivePath)
+	tmpFile, err := os.CreateTemp("", "sbxb-update-*")
 	if err != nil {
 		fmt.Printf("Failed to create temp file: %v\n", err)
 		return
 	}
-	written, err := io.Copy(f, dlResp.Body)
-	f.Close()
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+
+	written, err := io.Copy(tmpFile, dlResp.Body)
+	tmpFile.Close()
 	if err != nil {
 		fmt.Printf("Download failed: %v\n", err)
 		return
 	}
 	fmt.Printf("Downloaded %.1f MB\n", float64(written)/1024/1024)
 
-	// 4. Extract.
-	if strings.HasSuffix(ext, ".tar.gz") {
-		if err := extractTarGz(archivePath, tmpDir); err != nil {
-			fmt.Printf("Extract failed: %v\n", err)
-			return
-		}
-	} else {
-		fmt.Println("ZIP extraction not supported on this platform. Please update manually.")
-		return
-	}
-
-	// 5. Replace binary.
+	// 4. Replace binary.
 	binPath, err := os.Executable()
 	if err != nil {
 		fmt.Printf("Failed to locate current binary: %v\n", err)
@@ -124,26 +102,46 @@ func doUpdate() {
 	}
 	binPath, _ = filepath.EvalSymlinks(binPath)
 
-	newBin := filepath.Join(tmpDir, name)
-	if _, err := os.Stat(newBin); err != nil {
-		// Try without arch suffix.
-		newBin = filepath.Join(tmpDir, "sbxb")
-		if _, err := os.Stat(newBin); err != nil {
-			fmt.Println("Binary not found in archive.")
-			return
-		}
-	}
+	os.Chmod(tmpPath, 0755)
 
-	if err := os.Rename(newBin, binPath); err != nil {
+	if err := os.Rename(tmpPath, binPath); err != nil {
 		// Cross-device rename; fallback to copy.
-		if err := copyFile(newBin, binPath); err != nil {
+		if err := copyFile(tmpPath, binPath); err != nil {
 			fmt.Printf("Failed to replace binary: %v\n", err)
 			return
 		}
 	}
-	os.Chmod(binPath, 0755)
 
 	fmt.Printf("Updated to %s. Run 'sbxb restart' to apply.\n", release.TagName)
+}
+
+// getPlatformName returns the platform name matching CI release artifacts.
+// If platformName was injected via ldflags at build time, use it directly.
+// Otherwise, construct from runtime info (won't distinguish ARM sub-versions).
+func getPlatformName() string {
+	if platformName != "" {
+		return platformName
+	}
+	os := runtime.GOOS
+	if os == "darwin" {
+		os = "macos"
+	}
+	arch := runtime.GOARCH
+	switch arch {
+	case "amd64":
+		arch = "64"
+	case "386":
+		arch = "32"
+	case "arm64":
+		arch = "arm64-v8a"
+	case "arm":
+		arch = "arm32-v7a"
+	case "mips":
+		arch = "mips32"
+	case "mipsle":
+		arch = "mips32le"
+	}
+	return os + "-" + arch
 }
 
 func copyFile(src, dst string) error {

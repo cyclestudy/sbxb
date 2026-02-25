@@ -8,8 +8,9 @@ import (
 )
 
 var (
-	version = "dev"
-	commit  = "unknown"
+	version      = "dev"
+	commit       = "unknown"
+	platformName = "" // injected by ldflags, e.g. "linux-arm64-v8a"
 )
 
 func init() {
