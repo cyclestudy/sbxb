@@ -2,9 +2,9 @@
 set -e
 
 # sbxb install / update / uninstall script
-# Install:   bash <(curl -sL https://raw.githubusercontent.com/cyclestudy/sbxb/main/install.sh)
-# Update:    bash <(curl -sL https://raw.githubusercontent.com/cyclestudy/sbxb/main/install.sh) update
-# Uninstall: bash <(curl -sL https://raw.githubusercontent.com/cyclestudy/sbxb/main/install.sh) uninstall
+# Install:   sh -c "$(wget -qO- https://raw.githubusercontent.com/cyclestudy/sbxb/main/install.sh)"
+# Update:    sh -c "$(wget -qO- https://raw.githubusercontent.com/cyclestudy/sbxb/main/install.sh)" -- update
+# Uninstall: sh -c "$(wget -qO- https://raw.githubusercontent.com/cyclestudy/sbxb/main/install.sh)" -- uninstall
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -19,6 +19,29 @@ REPO="cyclestudy/sbxb"
 info()  { echo -e "${GREEN}[INFO]${NC} $1"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
+
+# Portable HTTP fetch: curl or wget
+fetch() {
+    local url="$1" dst="$2"
+    if command -v curl >/dev/null 2>&1; then
+        curl -sL "$url" -o "$dst" || return 1
+    elif command -v wget >/dev/null 2>&1; then
+        wget -qO "$dst" "$url" || return 1
+    else
+        error "Neither curl nor wget found. Install one first."
+    fi
+}
+
+fetch_stdout() {
+    local url="$1"
+    if command -v curl >/dev/null 2>&1; then
+        curl -sL "$url"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -qO- "$url"
+    else
+        error "Neither curl nor wget found. Install one first."
+    fi
+}
 
 detect_platform() {
     local os arch
@@ -50,7 +73,7 @@ detect_platform() {
 }
 
 get_latest_version() {
-    curl -sL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | sed 's/.*"tag_name": "\(.*\)".*/\1/'
+    fetch_stdout "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | sed 's/.*"tag_name": "\(.*\)".*/\1/'
 }
 
 get_current_version() {
@@ -68,7 +91,7 @@ download_and_extract() {
 
     info "Downloading ${version} for ${platform}..."
     mkdir -p "$INSTALL_DIR"
-    curl -sL "$url" -o "${INSTALL_DIR}/sbxb" || error "Download failed"
+    fetch "$url" "${INSTALL_DIR}/sbxb" || error "Download failed"
 
     # Verify it's actually an ELF/Mach-O binary (not a 404 HTML page)
     local magic
@@ -159,6 +182,10 @@ update() {
         was_running=true
         info "Stopping service..."
         systemctl stop ${SERVICE_NAME}.service
+    elif [ -f "/etc/init.d/${SERVICE_NAME}" ] && /etc/init.d/${SERVICE_NAME} status >/dev/null 2>&1; then
+        was_running=true
+        info "Stopping service..."
+        /etc/init.d/${SERVICE_NAME} stop
     fi
 
     download_and_extract "$latest"
@@ -166,7 +193,11 @@ update() {
     # Restart if was running
     if [ "$was_running" = true ]; then
         info "Starting service..."
-        systemctl start ${SERVICE_NAME}.service
+        if command -v systemctl >/dev/null 2>&1; then
+            systemctl start ${SERVICE_NAME}.service
+        elif [ -f "/etc/init.d/${SERVICE_NAME}" ]; then
+            /etc/init.d/${SERVICE_NAME} start
+        fi
     fi
 
     info "Updated to ${latest}"
