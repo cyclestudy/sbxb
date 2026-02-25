@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 set -e
 
 # sbxb install / update / uninstall script
@@ -71,8 +71,10 @@ download_and_extract() {
     tmpdir=$(mktemp -d)
     curl -sL "$url" -o "${tmpdir}/archive.tar.gz" || error "Download failed"
 
-    # Verify it's actually gzip
-    if ! file "${tmpdir}/archive.tar.gz" | grep -qi gzip; then
+    # Verify it's actually gzip (magic bytes: 1f 8b)
+    local magic
+    magic=$(od -A n -t x1 -N 2 "${tmpdir}/archive.tar.gz" | tr -d ' ')
+    if [ "$magic" != "1f8b" ]; then
         error "Downloaded file is not a valid gzip archive. Check if this platform is supported."
     fi
 
@@ -157,7 +159,7 @@ update() {
 
     # Stop service if running
     local was_running=false
-    if command -v systemctl &>/dev/null && systemctl is-active --quiet ${SERVICE_NAME}.service 2>/dev/null; then
+    if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet ${SERVICE_NAME}.service 2>/dev/null; then
         was_running=true
         info "Stopping service..."
         systemctl stop ${SERVICE_NAME}.service
@@ -182,16 +184,16 @@ uninstall() {
         *) echo "Cancelled."; return ;;
     esac
 
-    if command -v systemctl &>/dev/null; then
+    if command -v systemctl >/dev/null 2>&1; then
         systemctl stop ${SERVICE_NAME}.service 2>/dev/null || true
         systemctl disable ${SERVICE_NAME}.service 2>/dev/null || true
         rm -f /etc/systemd/system/${SERVICE_NAME}.service
         systemctl daemon-reload
     elif [ -f "/etc/init.d/${SERVICE_NAME}" ]; then
         /etc/init.d/${SERVICE_NAME} stop 2>/dev/null || true
-        if command -v update-rc.d &>/dev/null; then
+        if command -v update-rc.d >/dev/null 2>&1; then
             update-rc.d -f ${SERVICE_NAME} remove 2>/dev/null || true
-        elif command -v chkconfig &>/dev/null; then
+        elif command -v chkconfig >/dev/null 2>&1; then
             chkconfig ${SERVICE_NAME} off 2>/dev/null || true
         fi
         rm -f /etc/init.d/${SERVICE_NAME}
