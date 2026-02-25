@@ -58,6 +58,7 @@ func (m *Manager) Start(ctx context.Context, cfg conf.Config) error {
 	}
 
 	fetched := make([]prefetch, 0, len(cfg.Nodes))
+	routeSeen := make(map[int]bool)
 	var allRoutes []xboard.Route
 
 	for _, nodeCfg := range cfg.Nodes {
@@ -67,7 +68,12 @@ func (m *Manager) Start(ctx context.Context, cfg conf.Config) error {
 			return fmt.Errorf("manager: failed to pre-fetch node %d info: %w", nodeCfg.NodeID, err)
 		}
 		fetched = append(fetched, prefetch{config: nodeCfg, nodeInfo: nodeInfo, client: client})
-		allRoutes = append(allRoutes, nodeInfo.Routes...)
+		for _, r := range nodeInfo.Routes {
+			if !routeSeen[r.ID] {
+				routeSeen[r.ID] = true
+				allRoutes = append(allRoutes, r)
+			}
+		}
 	}
 
 	// 2. Build route rules from panel routes.
