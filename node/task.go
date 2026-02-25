@@ -50,7 +50,7 @@ func (ctrl *Controller) nodeInfoMonitor(ctx context.Context) error {
 	nodeID := ctrl.nodeConfig.NodeID
 
 	// 1. Fetch node info (returns nil if unchanged via ETag/304).
-	newNodeInfo, err := ctrl.client.GetNodeInfo()
+	newNodeInfo, err := ctrl.client.GetNodeInfo(ctx)
 	if err != nil {
 		return err
 	}
@@ -79,7 +79,7 @@ func (ctrl *Controller) nodeInfoMonitor(ctx context.Context) error {
 	}
 
 	// 2. Fetch user list (returns nil if unchanged).
-	newUsers, err := ctrl.client.GetUserList()
+	newUsers, err := ctrl.client.GetUserList(ctx)
 	if err != nil {
 		return err
 	}
@@ -103,7 +103,7 @@ func (ctrl *Controller) nodeInfoMonitor(ctx context.Context) error {
 	}
 
 	// 4. Fetch alive list from panel and update limiter.
-	alive, err := ctrl.client.GetAliveList()
+	alive, err := ctrl.client.GetAliveList(ctx)
 	if err != nil {
 		slog.Warn("failed to fetch alive data",
 			"nodeID", nodeID,
@@ -122,23 +122,19 @@ func (ctrl *Controller) nodeInfoMonitor(ctx context.Context) error {
 func (ctrl *Controller) trafficReporter(ctx context.Context) error {
 	nodeID := ctrl.nodeConfig.NodeID
 
-	// 1. Collect traffic from the tracker.
-	traffic := ctrl.tracker.GetTraffic()
+	// 1. Collect traffic from the tracker (only this node's inbound).
+	ctrl.mu.Lock()
+	tag := ctrl.tag
+	ctrl.mu.Unlock()
 
-	// 2. Filter out zero-traffic users.
-	filtered := make(map[int][2]int64)
-	for uid, data := range traffic {
-		if data[0] > 0 || data[1] > 0 {
-			filtered[uid] = data
-		}
-	}
+	traffic := ctrl.tracker.GetTrafficByInbound(tag)
 
-	// 3. Report traffic to panel (only if there is data).
-	if len(filtered) > 0 {
-		if err := ctrl.client.ReportTraffic(filtered); err != nil {
+	// 2. Report traffic to panel (only if there is data).
+	if len(traffic) > 0 {
+		if err := ctrl.client.ReportTraffic(ctx, traffic); err != nil {
 			// Restore unreported traffic back to the counters so it will
 			// be included in the next reporting cycle.
-			ctrl.tracker.RestoreTraffic(filtered)
+			ctrl.tracker.RestoreTrafficByInbound(tag, traffic)
 			slog.Error("failed to report traffic, data preserved for retry",
 				"nodeID", nodeID,
 				"error", err,
@@ -147,16 +143,16 @@ func (ctrl *Controller) trafficReporter(ctx context.Context) error {
 		}
 		slog.Info("traffic reported",
 			"nodeID", nodeID,
-			"userCount", len(filtered),
+			"userCount", len(traffic),
 		)
 	}
 
-	// 4. Get alive data from limiter.
+	// 3. Get alive data from limiter.
 	aliveData := ctrl.limiter.GetAliveData()
 
-	// 5. Report alive to panel (only if there is data).
+	// 4. Report alive to panel (only if there is data).
 	if len(aliveData) > 0 {
-		if err := ctrl.client.ReportAlive(aliveData); err != nil {
+		if err := ctrl.client.ReportAlive(ctx, aliveData); err != nil {
 			slog.Error("failed to report alive data",
 				"nodeID", nodeID,
 				"error", err,
@@ -167,6 +163,16 @@ func (ctrl *Controller) trafficReporter(ctx context.Context) error {
 			"nodeID", nodeID,
 			"userCount", len(aliveData),
 		)
+	}
+
+	// 5. Report server status.
+	status := collectStatus()
+	if err := ctrl.client.ReportStatus(ctx, status); err != nil {
+		slog.Debug("failed to report status",
+			"nodeID", nodeID,
+			"error", err,
+		)
+		// Non-fatal: don't return error for status report failure.
 	}
 
 	// 6. Update limiter user info from current user list.

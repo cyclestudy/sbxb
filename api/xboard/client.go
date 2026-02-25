@@ -2,6 +2,7 @@ package xboard
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -87,7 +88,7 @@ func (c *Client) setETag(path, etag string) {
 // get performs a GET request with ETag caching and retry logic.
 // Returns (body, statusCode, error).
 // On 304 Not Modified: returns (nil, 304, nil).
-func (c *Client) get(path string) ([]byte, int, error) {
+func (c *Client) get(ctx context.Context, path string) ([]byte, int, error) {
 	reqURL, err := c.buildURL(path)
 	if err != nil {
 		return nil, 0, err
@@ -103,10 +104,14 @@ func (c *Client) get(path string) ([]byte, int, error) {
 				"attempt", attempt,
 				"backoff", backoff,
 			)
-			time.Sleep(backoff)
+			select {
+			case <-ctx.Done():
+				return nil, 0, ctx.Err()
+			case <-time.After(backoff):
+			}
 		}
 
-		req, err := http.NewRequest(http.MethodGet, reqURL, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to create request: %w", err)
 		}
@@ -171,7 +176,7 @@ func (c *Client) get(path string) ([]byte, int, error) {
 }
 
 // post performs a POST request with JSON body and retry logic.
-func (c *Client) post(path string, data interface{}) ([]byte, error) {
+func (c *Client) post(ctx context.Context, path string, data interface{}) ([]byte, error) {
 	reqURL, err := c.buildURL(path)
 	if err != nil {
 		return nil, err
@@ -192,10 +197,14 @@ func (c *Client) post(path string, data interface{}) ([]byte, error) {
 				"attempt", attempt,
 				"backoff", backoff,
 			)
-			time.Sleep(backoff)
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(backoff):
+			}
 		}
 
-		req, err := http.NewRequest(http.MethodPost, reqURL, bytes.NewReader(payload))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(payload))
 		if err != nil {
 			return nil, fmt.Errorf("failed to create request: %w", err)
 		}

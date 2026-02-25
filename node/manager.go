@@ -27,7 +27,7 @@ type Manager struct {
 	routeChangeCh chan struct{}
 	reloadCancel  context.CancelFunc
 
-	reloadMu sync.Mutex // serializes Reload calls
+	reloadMu sync.Mutex // serializes Reload and Close calls
 	mu       sync.Mutex // protects fields above
 }
 
@@ -62,7 +62,7 @@ func (m *Manager) Start(ctx context.Context, cfg conf.Config) error {
 
 	for _, nodeCfg := range cfg.Nodes {
 		client := xboard.NewClient(nodeCfg.ApiHost, nodeCfg.ApiKey, nodeCfg.NodeID, nodeCfg.Timeout)
-		nodeInfo, err := client.GetNodeInfo()
+		nodeInfo, err := client.GetNodeInfo(ctx)
 		if err != nil {
 			return fmt.Errorf("manager: failed to pre-fetch node %d info: %w", nodeCfg.NodeID, err)
 		}
@@ -237,8 +237,17 @@ func (m *Manager) Start(ctx context.Context, cfg conf.Config) error {
 	return nil
 }
 
-// Close shuts down all controllers and the core.
+// Close shuts down all controllers and the core. It is serialized with
+// Reload to prevent races.
 func (m *Manager) Close() {
+	m.reloadMu.Lock()
+	defer m.reloadMu.Unlock()
+	m.closeInternal()
+}
+
+// closeInternal performs the actual shutdown. Must be called with
+// reloadMu held.
+func (m *Manager) closeInternal() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -294,7 +303,7 @@ func (m *Manager) Reload(ctx context.Context, cfg conf.Config) error {
 
 	slog.Info("manager: reloading", "newNodeCount", len(cfg.Nodes))
 
-	m.Close()
+	m.closeInternal()
 
 	if err := m.Start(ctx, cfg); err != nil {
 		return fmt.Errorf("manager: reload failed: %w", err)

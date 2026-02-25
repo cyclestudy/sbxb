@@ -173,11 +173,8 @@ func viewLog() {
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt)
-	go func() {
-		<-sigCh
-		_ = c.Process.Kill()
-	}()
-
-	_ = c.Wait()
+	<-sigCh
 	signal.Stop(sigCh)
+	_ = c.Process.Kill()
+	_ = c.Wait()
 }

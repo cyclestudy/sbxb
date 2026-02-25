@@ -1,6 +1,7 @@
 package counter
 
 import (
+	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -52,6 +53,23 @@ func (s *TrafficStorage) ResetAll() map[string][2]int64 {
 		tc := value.(*TrafficCounter)
 		data := tc.Reset()
 		result[user] = data
+		return true
+	})
+	return result
+}
+
+// ResetByPrefix resets only counters whose key starts with the given prefix
+// and returns their values. Non-matching entries are left untouched.
+func (s *TrafficStorage) ResetByPrefix(prefix string) map[string][2]int64 {
+	result := make(map[string][2]int64)
+	s.counters.Range(func(key, value any) bool {
+		k := key.(string)
+		if !strings.HasPrefix(k, prefix) {
+			return true
+		}
+		tc := value.(*TrafficCounter)
+		data := tc.Reset()
+		result[k] = data
 		return true
 	})
 	return result

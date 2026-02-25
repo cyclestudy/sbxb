@@ -1,6 +1,7 @@
 package xboard
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -12,8 +13,8 @@ const nodeInfoPath = "/api/v1/server/UniProxy/config"
 // GetNodeInfo fetches the node configuration from the panel.
 // Returns nil without error if the server responds with 304 Not Modified,
 // indicating the configuration has not changed since the last fetch.
-func (c *Client) GetNodeInfo() (*NodeInfo, error) {
-	body, statusCode, err := c.get(nodeInfoPath)
+func (c *Client) GetNodeInfo(ctx context.Context) (*NodeInfo, error) {
+	body, statusCode, err := c.get(ctx, nodeInfoPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch node info: %w", err)
 	}

@@ -15,7 +15,7 @@ import (
 
 // Core wraps a sing-box instance, providing thread-safe lifecycle management.
 type Core struct {
-	mu         sync.Mutex
+	mu         sync.RWMutex
 	instance   *box.Box
 	ctx        context.Context
 	cancel     context.CancelFunc
@@ -106,8 +106,8 @@ func (c *Core) Restart(options option.Options) error {
 // InboundManager returns the inbound manager of the running instance.
 // Returns nil if the core is not started.
 func (c *Core) InboundManager() adapter.InboundManager {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	if c.instance == nil {
 		return nil
 	}
@@ -117,8 +117,8 @@ func (c *Core) InboundManager() adapter.InboundManager {
 // Router returns the router of the running instance.
 // Returns nil if the core is not started.
 func (c *Core) Router() adapter.Router {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	if c.instance == nil {
 		return nil
 	}
@@ -127,8 +127,8 @@ func (c *Core) Router() adapter.Router {
 
 // Started reports whether the core is currently running.
 func (c *Core) Started() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return c.started
 }
 

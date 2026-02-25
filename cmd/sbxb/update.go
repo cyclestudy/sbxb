@@ -87,11 +87,21 @@ func doUpdate() {
 	defer os.Remove(tmpPath)
 
 	written, err := io.Copy(tmpFile, dlResp.Body)
-	tmpFile.Close()
+	if err := tmpFile.Close(); err != nil {
+		fmt.Printf("Failed to write temp file: %v\n", err)
+		return
+	}
 	if err != nil {
 		fmt.Printf("Download failed: %v\n", err)
 		return
 	}
+
+	// Verify file size (Go binary should be > 1MB).
+	if written < 1_000_000 {
+		fmt.Printf("Downloaded file is too small (%d bytes), aborting.\n", written)
+		return
+	}
+
 	fmt.Printf("Downloaded %.1f MB\n", float64(written)/1024/1024)
 
 	// 4. Replace binary.
@@ -102,7 +112,10 @@ func doUpdate() {
 	}
 	binPath, _ = filepath.EvalSymlinks(binPath)
 
-	os.Chmod(tmpPath, 0755)
+	if err := os.Chmod(tmpPath, 0755); err != nil {
+		fmt.Printf("Failed to set permissions: %v\n", err)
+		return
+	}
 
 	if err := os.Rename(tmpPath, binPath); err != nil {
 		// Cross-device rename; fallback to copy.
@@ -144,6 +157,8 @@ func getPlatformName() string {
 	return os + "-" + arch
 }
 
+// copyFile copies src to dst atomically: writes to a temp file in the
+// same directory, syncs, then renames over dst.
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
@@ -151,12 +166,41 @@ func copyFile(src, dst string) error {
 	}
 	defer in.Close()
 
-	out, err := os.Create(dst)
+	// Write to temp file in same directory as dst for atomic rename.
+	dir := filepath.Dir(dst)
+	tmp, err := os.CreateTemp(dir, ".sbxb-copy-*")
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	tmpPath := tmp.Name()
 
-	_, err = io.Copy(out, in)
-	return err
+	if _, err := io.Copy(tmp, in); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+
+	// Sync to disk before rename.
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+
+	if err := os.Chmod(tmpPath, 0755); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+
+	// Atomic rename.
+	if err := os.Rename(tmpPath, dst); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+
+	return nil
 }

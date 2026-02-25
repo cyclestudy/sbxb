@@ -77,7 +77,7 @@ func (ctrl *Controller) Start(ctx context.Context) error {
 
 	// 1. Fetch node info if not pre-set.
 	if ctrl.nodeInfo == nil {
-		nodeInfo, err := ctrl.client.GetNodeInfo()
+		nodeInfo, err := ctrl.client.GetNodeInfo(ctrl.ctx)
 		if err != nil {
 			return fmt.Errorf("node %d: failed to fetch node info: %w", ctrl.nodeConfig.NodeID, err)
 		}
@@ -92,7 +92,7 @@ func (ctrl *Controller) Start(ctx context.Context) error {
 	)
 
 	// 2. Fetch initial user list.
-	users, err := ctrl.client.GetUserList()
+	users, err := ctrl.client.GetUserList(ctrl.ctx)
 	if err != nil {
 		return fmt.Errorf("node %d: failed to fetch users: %w", ctrl.nodeConfig.NodeID, err)
 	}

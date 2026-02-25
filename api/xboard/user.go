@@ -1,6 +1,7 @@
 package xboard
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -18,8 +19,8 @@ const (
 
 // GetUserList fetches the current list of users from the panel.
 // Returns nil without error if the server responds with 304 Not Modified.
-func (c *Client) GetUserList() ([]UserInfo, error) {
-	body, statusCode, err := c.get(userListPath)
+func (c *Client) GetUserList(ctx context.Context) ([]UserInfo, error) {
+	body, statusCode, err := c.get(ctx, userListPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch user list: %w", err)
 	}
@@ -44,8 +45,8 @@ func (c *Client) GetUserList() ([]UserInfo, error) {
 
 // GetAliveList fetches the map of online users from the panel.
 // Returns nil without error if the server responds with 304 Not Modified.
-func (c *Client) GetAliveList() (AliveMap, error) {
-	body, statusCode, err := c.get(aliveListPath)
+func (c *Client) GetAliveList(ctx context.Context) (AliveMap, error) {
+	body, statusCode, err := c.get(ctx, aliveListPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch alive list: %w", err)
 	}
@@ -69,7 +70,7 @@ func (c *Client) GetAliveList() (AliveMap, error) {
 
 // ReportTraffic reports per-user upload/download traffic to the panel.
 // data maps user ID to [upload, download] byte counts.
-func (c *Client) ReportTraffic(data map[int][2]int64) error {
+func (c *Client) ReportTraffic(ctx context.Context, data map[int][2]int64) error {
 	if len(data) == 0 {
 		slog.Debug("no traffic data to report")
 		return nil
@@ -81,7 +82,7 @@ func (c *Client) ReportTraffic(data map[int][2]int64) error {
 		payload[strconv.Itoa(uid)] = traffic
 	}
 
-	_, err := c.post(pushPath, payload)
+	_, err := c.post(ctx, pushPath, payload)
 	if err != nil {
 		return fmt.Errorf("failed to report traffic: %w", err)
 	}
@@ -92,7 +93,7 @@ func (c *Client) ReportTraffic(data map[int][2]int64) error {
 
 // ReportAlive reports per-user IP connection info to the panel.
 // data maps user ID to a list of "ip_nodeId" strings.
-func (c *Client) ReportAlive(data map[int][]string) error {
+func (c *Client) ReportAlive(ctx context.Context, data map[int][]string) error {
 	if len(data) == 0 {
 		slog.Debug("no alive data to report")
 		return nil
@@ -104,7 +105,7 @@ func (c *Client) ReportAlive(data map[int][]string) error {
 		payload[strconv.Itoa(uid)] = ips
 	}
 
-	_, err := c.post(alivePath, payload)
+	_, err := c.post(ctx, alivePath, payload)
 	if err != nil {
 		return fmt.Errorf("failed to report alive data: %w", err)
 	}
@@ -114,12 +115,12 @@ func (c *Client) ReportAlive(data map[int][]string) error {
 }
 
 // ReportStatus reports the server's resource usage to the panel.
-func (c *Client) ReportStatus(status *StatusReport) error {
+func (c *Client) ReportStatus(ctx context.Context, status *StatusReport) error {
 	if status == nil {
 		return fmt.Errorf("status report is nil")
 	}
 
-	_, err := c.post(statusPath, status)
+	_, err := c.post(ctx, statusPath, status)
 	if err != nil {
 		return fmt.Errorf("failed to report status: %w", err)
 	}

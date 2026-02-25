@@ -161,6 +161,10 @@ func Watch(ctx context.Context, path string, callback func()) {
 				timer.Stop()
 			}
 			timer = time.AfterFunc(debounce, func() {
+				// Check if context was cancelled during debounce.
+				if ctx.Err() != nil {
+					return
+				}
 				slog.Info("config file changed, triggering reload", "path", absPath)
 				callback()
 			})

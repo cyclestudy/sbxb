@@ -2,6 +2,7 @@ package sbxb
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -34,7 +35,12 @@ func runServer(cmd *cobra.Command, args []string) error {
 	}
 
 	// Set log level.
-	setupLogger(cfg.Log.Level, cfg.Log.Output)
+	logCloser := setupLogger(cfg.Log.Level, cfg.Log.Output)
+	defer func() {
+		if logCloser != nil {
+			logCloser.Close()
+		}
+	}()
 
 	slog.Info("sbxb starting",
 		"version", version,
@@ -58,6 +64,12 @@ func runServer(cmd *cobra.Command, args []string) error {
 			slog.Error("failed to reload config", "error", err)
 			return
 		}
+		// Update logger if log settings changed.
+		newCloser := setupLogger(newCfg.Log.Level, newCfg.Log.Output)
+		if logCloser != nil {
+			logCloser.Close()
+		}
+		logCloser = newCloser
 		if err := mgr.Reload(ctx, *newCfg); err != nil {
 			slog.Error("failed to apply reloaded config", "error", err)
 		}
@@ -77,7 +89,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func setupLogger(level, output string) {
+// setupLogger configures the global slog logger. Returns an io.Closer
+// for the log file (nil if logging to stderr).
+func setupLogger(level, output string) io.Closer {
 	var logLevel slog.Level
 	switch level {
 	case "debug":
@@ -95,6 +109,7 @@ func setupLogger(level, output string) {
 	opts := &slog.HandlerOptions{Level: logLevel}
 
 	var handler slog.Handler
+	var closer io.Closer
 	if output != "" {
 		f, err := os.OpenFile(output, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err != nil {
@@ -102,10 +117,12 @@ func setupLogger(level, output string) {
 			handler = slog.NewTextHandler(os.Stderr, opts)
 		} else {
 			handler = slog.NewTextHandler(f, opts)
+			closer = f
 		}
 	} else {
 		handler = slog.NewTextHandler(os.Stderr, opts)
 	}
 
 	slog.SetDefault(slog.New(handler))
+	return closer
 }
