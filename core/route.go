@@ -19,8 +19,7 @@ type RouteResult struct {
 	Rules     []option.Rule
 	RuleSets  []option.RuleSet
 	Outbounds []option.Outbound
-	Final     string // default outbound tag, empty = "direct"
-	NeedSniff bool   // whether protocol sniffing is required
+	NeedSniff bool // whether protocol sniffing is required
 
 	// DNS configuration from "dns" action rules.
 	DNSServers []option.DNSServerOptions
@@ -28,12 +27,21 @@ type RouteResult struct {
 }
 
 // BuildRouteRules converts XBoard panel routes into sing-box route rules,
-// extra outbounds (for default_out), and the final outbound tag.
-func BuildRouteRules(routes []xboard.Route) RouteResult {
+// extra outbounds, and DNS config. Each route carries an optional list of
+// inbound tags it should apply to (nil = all inbounds / global).
+// default_out is converted to an explicit catch-all rule with inbound
+// filtering, so the global Final always remains "direct".
+func BuildRouteRules(routes []xboard.RouteWithInbounds) RouteResult {
 	var result RouteResult
-	ruleSetSeen := make(map[string]bool) // deduplicate rule sets by tag
+	ruleSetSeen := make(map[string]bool)
 
-	for _, r := range routes {
+	// Collect default_out rules to append at the end (catch-all).
+	var defaultOutRules []option.Rule
+
+	for _, rwi := range routes {
+		r := rwi.Route
+		inbounds := rwi.Inbounds // nil = global
+
 		switch r.Action {
 		case "block":
 			if len(r.Match) == 0 {
@@ -43,18 +51,18 @@ func BuildRouteRules(routes []xboard.Route) RouteResult {
 				Type: C.RuleTypeDefault,
 				DefaultOptions: option.DefaultRule{
 					RawDefaultRule: option.RawDefaultRule{
+						Inbound:      inbounds,
 						DomainSuffix: badoption.Listable[string](r.Match),
 					},
 					RuleAction: blockAction(),
 				},
 			})
-			slog.Info("route rule: block domains", "id", r.ID, "count", len(r.Match))
+			slog.Info("route rule: block domains", "id", r.ID, "count", len(r.Match), "inbounds", inbounds)
 
 		case "block_ip":
 			if len(r.Match) == 0 {
 				continue
 			}
-			// Parse "geoip:XX" format → use rule_set (geoip db removed in sing-box 1.12).
 			for _, m := range r.Match {
 				if strings.HasPrefix(m, "geoip:") {
 					code := strings.TrimPrefix(m, "geoip:")
@@ -75,24 +83,25 @@ func BuildRouteRules(routes []xboard.Route) RouteResult {
 						Type: C.RuleTypeDefault,
 						DefaultOptions: option.DefaultRule{
 							RawDefaultRule: option.RawDefaultRule{
+								Inbound: inbounds,
 								RuleSet: badoption.Listable[string]{tag},
 							},
 							RuleAction: blockAction(),
 						},
 					})
-					slog.Info("route rule: block geoip via rule_set", "id", r.ID, "code", code)
+					slog.Info("route rule: block geoip via rule_set", "id", r.ID, "code", code, "inbounds", inbounds)
 				} else {
-					// Plain IP CIDR.
 					result.Rules = append(result.Rules, option.Rule{
 						Type: C.RuleTypeDefault,
 						DefaultOptions: option.DefaultRule{
 							RawDefaultRule: option.RawDefaultRule{
-								IPCIDR: badoption.Listable[string]{m},
+								Inbound: inbounds,
+								IPCIDR:  badoption.Listable[string]{m},
 							},
 							RuleAction: blockAction(),
 						},
 					})
-					slog.Info("route rule: block ip cidr", "id", r.ID, "cidr", m)
+					slog.Info("route rule: block ip cidr", "id", r.ID, "cidr", m, "inbounds", inbounds)
 				}
 			}
 
@@ -105,12 +114,13 @@ func BuildRouteRules(routes []xboard.Route) RouteResult {
 				Type: C.RuleTypeDefault,
 				DefaultOptions: option.DefaultRule{
 					RawDefaultRule: option.RawDefaultRule{
+						Inbound:  inbounds,
 						Protocol: badoption.Listable[string](r.Match),
 					},
 					RuleAction: blockAction(),
 				},
 			})
-			slog.Info("route rule: block protocols", "id", r.ID, "protocols", r.Match)
+			slog.Info("route rule: block protocols", "id", r.ID, "protocols", r.Match, "inbounds", inbounds)
 
 		case "direct":
 			if len(r.Match) == 0 {
@@ -120,6 +130,7 @@ func BuildRouteRules(routes []xboard.Route) RouteResult {
 				Type: C.RuleTypeDefault,
 				DefaultOptions: option.DefaultRule{
 					RawDefaultRule: option.RawDefaultRule{
+						Inbound:      inbounds,
 						DomainSuffix: badoption.Listable[string](r.Match),
 					},
 					RuleAction: option.RuleAction{
@@ -130,14 +141,29 @@ func BuildRouteRules(routes []xboard.Route) RouteResult {
 					},
 				},
 			})
-			slog.Info("route rule: direct domains", "id", r.ID, "count", len(r.Match))
+			slog.Info("route rule: direct domains", "id", r.ID, "count", len(r.Match), "inbounds", inbounds)
 
 		case "default_out":
 			outbound, tag := parseOutbound(r.ActionValue, "default-out")
 			if outbound != nil {
 				result.Outbounds = append(result.Outbounds, *outbound)
-				result.Final = tag
-				slog.Info("route rule: default outbound", "id", r.ID, "tag", tag)
+				// Convert to explicit catch-all rule with inbound filter,
+				// appended at the end so it acts as per-inbound default.
+				defaultOutRules = append(defaultOutRules, option.Rule{
+					Type: C.RuleTypeDefault,
+					DefaultOptions: option.DefaultRule{
+						RawDefaultRule: option.RawDefaultRule{
+							Inbound: inbounds,
+						},
+						RuleAction: option.RuleAction{
+							Action: C.RuleActionTypeRoute,
+							RouteOptions: option.RouteActionOptions{
+								Outbound: tag,
+							},
+						},
+					},
+				})
+				slog.Info("route rule: default outbound", "id", r.ID, "tag", tag, "inbounds", inbounds)
 			}
 
 		case "dns":
@@ -193,13 +219,14 @@ func BuildRouteRules(routes []xboard.Route) RouteResult {
 					Type: C.RuleTypeDefault,
 					DefaultOptions: option.DefaultRule{
 						RawDefaultRule: option.RawDefaultRule{
+							Inbound:   inbounds,
 							Port:      ports,
 							PortRange: portRanges,
 						},
 						RuleAction: blockAction(),
 					},
 				})
-				slog.Info("route rule: block ports", "id", r.ID, "ports", len(ports), "ranges", len(portRanges))
+				slog.Info("route rule: block ports", "id", r.ID, "ports", len(ports), "ranges", len(portRanges), "inbounds", inbounds)
 			}
 
 		case "route":
@@ -216,6 +243,7 @@ func BuildRouteRules(routes []xboard.Route) RouteResult {
 				Type: C.RuleTypeDefault,
 				DefaultOptions: option.DefaultRule{
 					RawDefaultRule: option.RawDefaultRule{
+						Inbound:      inbounds,
 						DomainSuffix: badoption.Listable[string](r.Match),
 					},
 					RuleAction: option.RuleAction{
@@ -226,7 +254,7 @@ func BuildRouteRules(routes []xboard.Route) RouteResult {
 					},
 				},
 			})
-			slog.Info("route rule: route domains", "id", r.ID, "tag", tag, "domains", len(r.Match))
+			slog.Info("route rule: route domains", "id", r.ID, "tag", tag, "domains", len(r.Match), "inbounds", inbounds)
 
 		case "route_ip":
 			if len(r.Match) == 0 || r.ActionValue == "" {
@@ -258,6 +286,7 @@ func BuildRouteRules(routes []xboard.Route) RouteResult {
 						Type: C.RuleTypeDefault,
 						DefaultOptions: option.DefaultRule{
 							RawDefaultRule: option.RawDefaultRule{
+								Inbound: inbounds,
 								RuleSet: badoption.Listable[string]{rsTag},
 							},
 							RuleAction: option.RuleAction{
@@ -268,13 +297,14 @@ func BuildRouteRules(routes []xboard.Route) RouteResult {
 							},
 						},
 					})
-					slog.Info("route rule: route geoip via rule_set", "id", r.ID, "code", code, "tag", tag)
+					slog.Info("route rule: route geoip via rule_set", "id", r.ID, "code", code, "tag", tag, "inbounds", inbounds)
 				} else {
 					result.Rules = append(result.Rules, option.Rule{
 						Type: C.RuleTypeDefault,
 						DefaultOptions: option.DefaultRule{
 							RawDefaultRule: option.RawDefaultRule{
-								IPCIDR: badoption.Listable[string]{m},
+								Inbound: inbounds,
+								IPCIDR:  badoption.Listable[string]{m},
 							},
 							RuleAction: option.RuleAction{
 								Action: C.RuleActionTypeRoute,
@@ -284,7 +314,7 @@ func BuildRouteRules(routes []xboard.Route) RouteResult {
 							},
 						},
 					})
-					slog.Info("route rule: route ip cidr", "id", r.ID, "cidr", m, "tag", tag)
+					slog.Info("route rule: route ip cidr", "id", r.ID, "cidr", m, "tag", tag, "inbounds", inbounds)
 				}
 			}
 
@@ -292,6 +322,9 @@ func BuildRouteRules(routes []xboard.Route) RouteResult {
 			slog.Warn("unknown route action, skipping", "action", r.Action, "id", r.ID)
 		}
 	}
+
+	// Append default_out catch-all rules at the end.
+	result.Rules = append(result.Rules, defaultOutRules...)
 
 	return result
 }

@@ -58,8 +58,7 @@ func (m *Manager) Start(ctx context.Context, cfg conf.Config) error {
 	}
 
 	fetched := make([]prefetch, 0, len(cfg.Nodes))
-	routeSeen := make(map[int]bool)
-	var allRoutes []xboard.Route
+	routeMap := make(map[int]*xboard.RouteWithInbounds)
 
 	for _, nodeCfg := range cfg.Nodes {
 		client := xboard.NewClient(nodeCfg.ApiHost, nodeCfg.ApiKey, nodeCfg.NodeID, nodeCfg.NodeType, nodeCfg.Timeout)
@@ -68,12 +67,26 @@ func (m *Manager) Start(ctx context.Context, cfg conf.Config) error {
 			return fmt.Errorf("manager: failed to pre-fetch node %d info: %w", nodeCfg.NodeID, err)
 		}
 		fetched = append(fetched, prefetch{config: nodeCfg, nodeInfo: nodeInfo, client: client})
+		tag := fmt.Sprintf("%s-%d", nodeInfo.Protocol, nodeCfg.NodeID)
 		for _, r := range nodeInfo.Routes {
-			if !routeSeen[r.ID] {
-				routeSeen[r.ID] = true
-				allRoutes = append(allRoutes, r)
+			if existing, ok := routeMap[r.ID]; ok {
+				existing.Inbounds = append(existing.Inbounds, tag)
+			} else {
+				routeMap[r.ID] = &xboard.RouteWithInbounds{
+					Route:    r,
+					Inbounds: []string{tag},
+				}
 			}
 		}
+	}
+
+	// Build route inputs. If a route applies to all nodes, clear inbounds (global).
+	allRoutes := make([]xboard.RouteWithInbounds, 0, len(routeMap))
+	for _, rwi := range routeMap {
+		if len(rwi.Inbounds) == len(fetched) {
+			rwi.Inbounds = nil // global, no inbound filter needed
+		}
+		allRoutes = append(allRoutes, *rwi)
 	}
 
 	// 2. Build route rules from panel routes.
@@ -143,9 +156,6 @@ func (m *Manager) Start(ctx context.Context, cfg conf.Config) error {
 		rules = append(rules, routeResult.Rules...)
 
 		finalOut := "direct"
-		if routeResult.Final != "" {
-			finalOut = routeResult.Final
-		}
 
 		baseOpts.Route = &option.RouteOptions{
 			Rules:   rules,

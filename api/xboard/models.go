@@ -60,6 +60,12 @@ type Route struct {
 	ActionValue string   `json:"action_value"`
 }
 
+// RouteWithInbounds associates a route with the inbound tags it should apply to.
+type RouteWithInbounds struct {
+	Route    Route
+	Inbounds []string // e.g. ["vless-888", "hysteria-886"]; nil = all inbounds
+}
+
 // UserInfo represents a user fetched from the panel.
 type UserInfo struct {
 	ID          int    `json:"id"`
