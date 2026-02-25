@@ -25,7 +25,6 @@ type Client struct {
 	apiHost    string
 	apiKey     string
 	nodeID     int
-	nodeType   string
 
 	mu    sync.RWMutex
 	etags map[string]string // per-endpoint ETag cache
@@ -33,7 +32,7 @@ type Client struct {
 
 // NewClient creates a new XBoard API client.
 // timeout is in seconds; if <= 0 it defaults to 30.
-func NewClient(apiHost, apiKey string, nodeID int, nodeType string, timeout int) *Client {
+func NewClient(apiHost, apiKey string, nodeID, timeout int) *Client {
 	if timeout <= 0 {
 		timeout = 30
 	}
@@ -45,11 +44,10 @@ func NewClient(apiHost, apiKey string, nodeID int, nodeType string, timeout int)
 		httpClient: &http.Client{
 			Timeout: time.Duration(timeout) * time.Second,
 		},
-		apiHost:  apiHost,
-		apiKey:   apiKey,
-		nodeID:   nodeID,
-		nodeType: nodeType,
-		etags:    make(map[string]string),
+		apiHost: apiHost,
+		apiKey:  apiKey,
+		nodeID:  nodeID,
+		etags:   make(map[string]string),
 	}
 }
 
@@ -65,7 +63,6 @@ func (c *Client) buildURL(path string) (string, error) {
 	q := u.Query()
 	q.Set("token", c.apiKey)
 	q.Set("node_id", strconv.Itoa(c.nodeID))
-	q.Set("node_type", c.nodeType)
 	u.RawQuery = q.Encode()
 
 	return u.String(), nil

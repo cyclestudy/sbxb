@@ -61,7 +61,7 @@ func (m *Manager) Start(ctx context.Context, cfg conf.Config) error {
 	routeMap := make(map[int]*xboard.RouteWithInbounds)
 
 	for _, nodeCfg := range cfg.Nodes {
-		client := xboard.NewClient(nodeCfg.ApiHost, nodeCfg.ApiKey, nodeCfg.NodeID, nodeCfg.NodeType, nodeCfg.Timeout)
+		client := xboard.NewClient(nodeCfg.ApiHost, nodeCfg.ApiKey, nodeCfg.NodeID, nodeCfg.Timeout)
 		nodeInfo, err := client.GetNodeInfo()
 		if err != nil {
 			return fmt.Errorf("manager: failed to pre-fetch node %d info: %w", nodeCfg.NodeID, err)

@@ -31,7 +31,7 @@ type NodeConfig struct {
 	ApiHost  string `json:"api_host" mapstructure:"api_host"`
 	ApiKey   string `json:"api_key" mapstructure:"api_key"`
 	NodeID   int    `json:"node_id" mapstructure:"node_id"`
-	NodeType string `json:"node_type" mapstructure:"node_type"`
+	NodeType string `json:"node_type,omitempty" mapstructure:"node_type"` // deprecated: auto-detected from panel
 	Timeout  int    `json:"timeout" mapstructure:"timeout"`
 }
 
@@ -88,9 +88,6 @@ func Load(path string) (*Config, error) {
 		}
 		if node.NodeID <= 0 {
 			return nil, fmt.Errorf("node[%d]: node_id must be positive", i)
-		}
-		if node.NodeType == "" {
-			return nil, fmt.Errorf("node[%d]: node_type is required", i)
 		}
 	}
 

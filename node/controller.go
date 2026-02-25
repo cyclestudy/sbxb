@@ -43,7 +43,6 @@ func NewController(nodeConfig conf.NodeConfig, c *core.Core, tracker *core.Traff
 		nodeConfig.ApiHost,
 		nodeConfig.ApiKey,
 		nodeConfig.NodeID,
-		nodeConfig.NodeType,
 		nodeConfig.Timeout,
 	)
 	return &Controller{

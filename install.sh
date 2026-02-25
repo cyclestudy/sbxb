@@ -129,7 +129,6 @@ install() {
             "api_host": "https://your-xboard-panel.com",
             "api_key": "your-api-token",
             "node_id": 1,
-            "node_type": "vless",
             "timeout": 30
         }
     ]
