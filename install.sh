@@ -102,6 +102,7 @@ download_and_extract() {
     fi
 
     chmod +x "${INSTALL_DIR}/sbxb"
+    mkdir -p /usr/local/bin
     ln -sf "${INSTALL_DIR}/sbxb" /usr/local/bin/sbxb
 }
 
