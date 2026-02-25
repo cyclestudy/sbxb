@@ -93,15 +93,13 @@ download_and_extract() {
     mkdir -p "$INSTALL_DIR"
     fetch "$url" "${INSTALL_DIR}/sbxb" || error "Download failed"
 
-    # Verify it's actually an ELF/Mach-O binary (not a 404 HTML page)
-    local magic
-    magic=$(od -A n -t x1 -N 4 "${INSTALL_DIR}/sbxb" | tr -d ' ')
-    case "$magic" in
-        7f454c46) ;;  # ELF
-        feedface|feedfacf|cafebabe) ;;  # Mach-O
-        4d5a*) ;;  # MZ (Windows PE)
-        *) rm -f "${INSTALL_DIR}/sbxb"; error "Downloaded file is not a valid binary. Check if this platform is supported." ;;
-    esac
+    # Verify it's not a 404 HTML page (Go binary is always > 1MB)
+    local size
+    size=$(wc -c < "${INSTALL_DIR}/sbxb")
+    if [ "$size" -lt 1000000 ]; then
+        rm -f "${INSTALL_DIR}/sbxb"
+        error "Downloaded file is too small (${size} bytes). Check if this platform is supported."
+    fi
 
     chmod +x "${INSTALL_DIR}/sbxb"
     ln -sf "${INSTALL_DIR}/sbxb" /usr/local/bin/sbxb
